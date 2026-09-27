@@ -52,7 +52,7 @@ apps/
 
 ```bash
 npm install
-npm run verify        # lint + typecheck + 115 tests
+npm run verify        # lint + typecheck + 179 tests
 npm run dev           # api on :4000, web on :5173
 ```
 
@@ -140,6 +140,20 @@ Embeddings ship as a deterministic local provider so retrieval, freshness and
 deactivation paths are fully testable offline, with no API key and no data leaving the
 machine. A hosted vector model plugs in behind the same interface.
 
+## Who can see what
+
+Creators have accounts. Passwords are hashed with scrypt (Node standard library, no
+dependency), sessions are opaque server-side tokens where only the SHA-256 is stored, and
+every mutating request carries a CSRF token.
+
+- creator data is scoped to the signed-in account — one creator can never see another's alerts;
+- the platform directory, source registry, evolution log, knowledge and the Evolution Center
+  require the **admin** role, by session or by operator token;
+- identity is separate from intelligence: what the system learned about a creator is not what
+  grants them access;
+- five wrong passwords locks an account for fifteen minutes, and a missing account costs the
+  same time as a wrong one so it cannot be detected.
+
 ## Creator-facing language
 
 Creators see *What's changed*, *Create*, *Platform support*, *Your updates*, *Coming soon*.
@@ -156,8 +170,7 @@ See `.env.example`. Notable values:
 | `RESEARCH_ENABLED` | `false` | run the World Engine loop |
 | `RESEARCH_INTERVAL_MS` | `900000` | cadence between cycles |
 | `ALLOWED_HOSTS` | *(empty = all)* | comma-separated hosts the engine may read |
-| `ADMIN_TOKEN` | *(empty)* | bearer token for `/api/admin/*`; required in production |
-| `CREATOR_ID` | *(empty)* | which creator the app acts as, until real accounts exist |
+| `ADMIN_TOKEN` | *(empty)* | operator token for admin surfaces; required in production |
 | `OPENROUTER_API_KEY` | *(empty)* | optional model for fact extraction; unset means deterministic only |
 | `OPENROUTER_MODEL` | `openrouter/stealth/space-bunny-alpha` | model id |
 | `DATA_DIR` | *(empty = memory)* | directory for the control-plane JSON snapshot |
@@ -193,10 +206,12 @@ npm run model:check      # one-off: does the configured provider answer?
 | Config-driven UI model + platform readiness | implemented, tested |
 | Prompt versioning | implemented, tested |
 | **Creator web app: creation flow, updates, platform support, coming soon** | **implemented, tested** |
+| **Accounts, sessions, roles, tenant isolation** | **implemented, tested** |
+| **Optional model provider for fact extraction** | **implemented, tested** |
 | Draft composer (deterministic, capability-aware) | implemented, tested |
-| Creator accounts, sessions, RBAC | Phase 3 |
-| Per-platform documentation curation + yield ranking | Phase 3 |
-| Postgres persistence, real publishing adapters, hosted embeddings | Phase 3 |
+| Per-platform documentation curation + yield ranking | Phase 4 |
+| Email verification, password reset, per-IP rate limiting | Phase 4 |
+| Postgres persistence, real publishing adapters | Phase 4 |
 
 See `docs/PHASE-1.md` and `docs/PHASE-2.md` for scope, and `ARCHITECTURE.md` for the design.
 

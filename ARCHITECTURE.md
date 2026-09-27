@@ -232,7 +232,59 @@ state into what a creator needs and nothing else: options, limits, reasons, sour
 Tests fail the build if any of these responses contain internal vocabulary, and the web app's
 server-rendered pages are checked for the same thing.
 
-## 12. The creator app
+## 12. Identity, sessions and trust
+
+Identity is deliberately **separate from intelligence**:
+
+```
+CreatorAccount  ──link──▶  CreatorProfile
+  email, passwordHash,      platformSlugs, goals,
+  role, status, failures    usedCapabilityKeys, learned preferences
+```
+
+A `CreatorAccount` is who you are and what you may do. A `CreatorProfile` is what the system
+knows about you. Learning about a creator must never grant access, and losing an account must
+not lose what was learned.
+
+| Concern | Decision |
+| --- | --- |
+| Password storage | `scrypt` from Node's standard library; N/r/p stored in the hash so they can be raised later |
+| Verification | `timingSafeEqual`; a malformed stored hash fails closed |
+| Session | opaque 32 random bytes in an HttpOnly cookie; only SHA-256 stored; revocable, expiring |
+| Why not JWT | revocation. A self-contained token cannot be withdrawn, and the Evolution Center needs to be able to cut a session instantly |
+| CSRF | double-submit token required on every mutating request |
+| Lockout | 5 failures → 15 minutes; a missing account burns comparable time |
+| Authorisation | one permission table, so "who can do what" is data |
+
+Route rules:
+
+| Surface | Rule |
+| --- | --- |
+| `/api/creator/*` | session required, scoped to that account's profile |
+| `/api/platforms`, `/api/sources`, `/api/evolution/*`, `/api/knowledge/*` | `admin` role or operator token |
+| `/evolution-center`, `/api/admin/*` | `admin` role or operator token; refuses to run unprotected in production |
+| `/api/health` | open for monitoring; exposes no creator data |
+
+## 13. The model is a contributor, not an authority
+
+When a provider key is configured, a model runs first over documentation text. Everything
+about it is defensive:
+
+```
+page text ─► model ─► parse ─► validate ─► cap confidence ─► merge with deterministic ─► verification gate
+              │          │         │             │                 │
+              │          │         │             │                 └─ always runs, so a model adds coverage only
+              │          │         │             └─ max 0.8: a model's confidence is not evidence
+              │          │         └─ unknown areas and categories are dropped
+              │          └─ output must be a JSON array; anything else yields no facts
+              └─ failure, timeout or outage ⇒ silent fallback, cycle continues
+```
+
+A fact survives only if it quotes the page **verbatim**. Boilerplate never becomes knowledge.
+The provider key is read in exactly one place, never logged, never returned by a route, never
+echoed in an error, and a test fails the build if a key-shaped string is ever committed.
+
+## 14. The creator app
 
 `apps/web` is React + Vite with three runtime dependencies and one stylesheet. All product
 logic lives in `apps/web/src/lib/view-models.ts` as pure functions, so the rules are tested
@@ -258,7 +310,7 @@ without a frontend change.
 In development Vite proxies `/api` to the API on `:4000`; in production the API serves
 `apps/web/dist` with an SPA fallback, so there is one origin and no CORS in the product path.
 
-## 13. Deliberate non-goals
+## 15. Deliberate non-goals
 
 - **No AI writes code.** Not by policy, by architecture: there is no code-generation path
   in the repo.
