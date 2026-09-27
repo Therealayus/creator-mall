@@ -9,6 +9,8 @@ import type {
 import type { KnowledgeStatus, TtlPolicy } from '../types/enums.js'
 import { expiresAtFor } from '../verify/trust.js'
 import { chunkText, embedText, estimateTokens } from './chunking.js'
+import { LocalEmbeddingProvider } from './embedding-providers.js'
+import type { EmbeddingProvider } from './embedding-providers.js'
 import { nowIso, stableId } from '../util.js'
 
 export interface UpsertDocumentInput {
@@ -230,6 +232,49 @@ function lexicalScore(terms: string[], text: string): number {
     if (haystack.includes(term)) score += 1
   }
   return score / terms.length
+}
+
+/**
+ * Embedding a knowledge base.
+ *
+ * A provider is optional: without one, the deterministic local provider keeps
+ * retrieval, freshness and deactivation fully working offline. A provider
+ * failure degrades to local rather than leaving the index incomplete.
+ */
+export async function embedPendingChunks(
+  store: KnowledgeStore,
+  options: { provider?: EmbeddingProvider; batchSize?: number; onFallback?: (reason: string) => void },
+): Promise<{ embedded: number; skipped: number; fallbacks: string[] }> {
+  const provider = options.provider ?? new LocalEmbeddingProvider()
+  const batchSize = options.batchSize ?? 32
+  const fallbacks: string[] = []
+
+  const pending = [...store.chunks.values()]
+    .filter((chunk) => chunk.embedding === null || chunk.embedding.provider !== provider.name)
+    .sort((a, b) => (a.versionId < b.versionId ? -1 : a.versionId > b.versionId ? 1 : a.ordinal - b.ordinal))
+
+  let embedded = 0
+  for (let start = 0; start < pending.length; start += batchSize) {
+    const batch = pending.slice(start, start + batchSize)
+    let vectors
+    try {
+      vectors = await provider.embedBatch(batch.map((chunk) => chunk.text))
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'embedding failed'
+      fallbacks.push(reason)
+      options.onFallback?.(reason)
+      const local = new LocalEmbeddingProvider()
+      vectors = await local.embedBatch(batch.map((chunk) => chunk.text))
+    }
+    batch.forEach((chunk, index) => {
+      const vector = vectors[index]
+      if (!vector) return
+      chunk.embedding = vector
+      embedded += 1
+    })
+  }
+
+  return { embedded, skipped: pending.length - embedded, fallbacks: [...new Set(fallbacks)] }
 }
 
 export function tokenize(value: string): string[] {

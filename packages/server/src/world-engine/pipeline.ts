@@ -1,6 +1,7 @@
 import {
   EMPTY_SOURCE_STATS,
   HeuristicFactExtractor,
+  embedPendingChunks,
   schedulePriority,
   scoreSource,
   assessSources,
@@ -32,7 +33,7 @@ import type {
   StateDelta,
   VerifiedClaim,
 } from '@creator-mall/core'
-import type { FactExtractor, SourceScore, SourceStats } from '@creator-mall/core'
+import type { EmbeddingProvider, FactExtractor, SourceScore, SourceStats } from '@creator-mall/core'
 import type { ControlPlane } from '../store/control-plane.js'
 import type { PublicFetcher } from './fetcher.js'
 import { applyClaims } from './state-builder.js'
@@ -52,6 +53,8 @@ export interface ResearchDeps {
    * outage degrades quality instead of stopping research (§38).
    */
   modelExtractor?: FactExtractor | null
+  /** Optional hosted embedding provider; the local one is the default. */
+  embeddingProvider?: EmbeddingProvider | null
   /** Called with a short, key-free reason when the model path is skipped. */
   onModelFallback?: (reason: string) => void
 }
@@ -62,6 +65,8 @@ export interface CycleResult extends ResearchJobRun {
   modelFallbacks: string[]
   /** Documentation-path candidates probed this cycle. */
   candidatesProbed: number
+  /** Chunks re-embedded after knowledge changed. */
+  embeddingsRefreshed: number
 }
 
 /**
@@ -210,6 +215,16 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
 
   expireStaleKnowledge(control.knowledge, clock)
 
+  // Embeddings are refreshed after knowledge changes, and never block the cycle.
+  const embedding = await embedPendingChunks(control.knowledge, {
+    ...(deps.embeddingProvider ? { provider: deps.embeddingProvider } : {}),
+    onFallback: (reason) => {
+      const note = `embedding: ${reason}`
+      modelFallbacks.push(note)
+      deps.onModelFallback?.(reason)
+    },
+  })
+
   const status: ResearchJobRun['status'] =
     sourcesFailed === 0 ? 'SUCCESS' : sourcesChecked === 0 ? 'FAILED' : 'PARTIAL'
 
@@ -227,6 +242,7 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     error: null,
     modelFallbacks: [...new Set(modelFallbacks)],
     candidatesProbed: probedCandidates,
+    embeddingsRefreshed: embedding.embedded,
     events: createdEvents,
   }
   control.addJobRun(result)

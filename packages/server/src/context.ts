@@ -1,7 +1,7 @@
 import type { Config } from './config.js'
 import { loadConfig } from './config.js'
-import { ModelFactExtractor } from '@creator-mall/core'
-import type { CreatorProfile, FactExtractor, SocialPlatform } from '@creator-mall/core'
+import { HostedEmbeddingProvider, LocalEmbeddingProvider, ModelFactExtractor } from '@creator-mall/core'
+import type { CreatorProfile, EmbeddingProvider, FactExtractor, SocialPlatform } from '@creator-mall/core'
 import { attachRegistryToControlPlane, buildAdapterRegistry } from './adapters/registry.js'
 import type { AdapterRegistry, HttpAdapterDefinition } from './adapters/registry.js'
 import { isModelConfigured, OpenRouterClient, redactSecrets } from './ai/openrouter.js'
@@ -24,6 +24,8 @@ export interface AppContext {
   startedAt: string
   /** Model-backed extractor, or null when no provider is configured. */
   modelExtractor: FactExtractor | null
+  /** Embedding provider: hosted when a key is configured, local otherwise. */
+  embeddingProvider: EmbeddingProvider
   /**
    * Which creator the web app is acting as when no one is signed in.
    * Phase 3 adds real accounts; this keeps local development usable without a
@@ -65,6 +67,7 @@ export async function createContext(
     persistence,
     startedAt: nowIso(),
     modelExtractor: createModelExtractor(config),
+    embeddingProvider: createEmbeddingProvider(config),
     creatorSession: () => {
       if (config.CREATOR_ID) {
         const selected = control.getCreator(config.CREATOR_ID)
@@ -94,6 +97,24 @@ function createModelExtractor(config: Config): FactExtractor | null {
   })
 
   return new ModelFactExtractor({ client, maxInputChars: config.MODEL_MAX_INPUT_CHARS })
+}
+
+/**
+ * Embeddings: hosted when a provider key is configured, local otherwise.
+ *
+ * The local provider is a real, working default — knowledge is searchable with
+ * no key, no network and nothing leaving the machine.
+ */
+function createEmbeddingProvider(config: Config): EmbeddingProvider {
+  if (!isModelConfigured(config.OPENROUTER_API_KEY)) {
+    return new LocalEmbeddingProvider()
+  }
+  return new HostedEmbeddingProvider({
+    apiKey: config.OPENROUTER_API_KEY,
+    baseUrl: config.EMBEDDING_BASE_URL,
+    model: config.EMBEDDING_MODEL,
+    timeoutMs: config.MODEL_TIMEOUT_MS,
+  })
 }
 
 /**

@@ -68,6 +68,12 @@ const schema = z.object({
     .default('true')
     .transform((value) => value === 'true'),
 
+  // ─── Embeddings (optional) ──────────────────────────────────────────────────
+  // Unset means the deterministic local provider: no key, no network, and
+  // nothing about a creator leaving the machine.
+  EMBEDDING_BASE_URL: z.string().default('https://openrouter.com/api/v1'),
+  EMBEDDING_MODEL: z.string().default('openai/text-embedding-3-small'),
+
   // ─── Storage ───────────────────────────────────────────────────────────────
   DATABASE_URL: z.string().default(''),
   /** `json` keeps the file snapshot; `postgres` uses the control-plane tables. */

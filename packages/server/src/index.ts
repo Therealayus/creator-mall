@@ -23,6 +23,7 @@ async function main(): Promise<void> {
         control: context.control,
         fetcher: context.fetcher,
         modelExtractor: context.modelExtractor,
+        embeddingProvider: context.embeddingProvider,
         onModelFallback: (reason) => console.log(`[world-engine] model extraction skipped: ${reason}`),
       },
       {

@@ -41,6 +41,7 @@ export * from './ui/capability-config.js'
 export * from './ui/limits.js'
 
 export * from './knowledge/chunking.js'
+export * from './knowledge/embedding-providers.js'
 export * from './knowledge/store.js'
 
 export * from './prompts/diff.js'
