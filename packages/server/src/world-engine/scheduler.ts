@@ -63,6 +63,7 @@ export class ResearchScheduler {
         knowledgePublished: 0,
         error: 'a cycle is already running',
         modelFallbacks: [],
+        candidatesProbed: 0,
         events: [],
       }
     }
@@ -107,6 +108,7 @@ export class ResearchScheduler {
         knowledgePublished: 0,
         error: message,
         modelFallbacks: [],
+        candidatesProbed: 0,
         events: [],
       }
     } finally {

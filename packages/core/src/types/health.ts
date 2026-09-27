@@ -39,4 +39,6 @@ export interface ResearchJobRun {
   error: string | null
   /** Short, key-free reasons the model extraction path was not used. */
   modelFallbacks?: string[]
+  /** Documentation-path candidates probed this cycle. */
+  candidatesProbed?: number
 }

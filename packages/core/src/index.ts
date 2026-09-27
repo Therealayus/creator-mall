@@ -54,4 +54,7 @@ export * from './auth/password.js'
 export * from './auth/session.js'
 export * from './auth/rbac.js'
 
+export * from './curation/source-score.js'
+export * from './curation/candidate-paths.js'
+
 export * from './health/report.js'

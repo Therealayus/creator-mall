@@ -1,5 +1,7 @@
 import type { AppContext } from '../context.js'
 import { evolutionSummary, platformView } from './views.js'
+import { scoreSource, summariseCuration } from '@creator-mall/core'
+import { sourceStats } from '../world-engine/pipeline.js'
 import { escapeHtml } from '../util/html.js'
 
 /**
@@ -16,6 +18,10 @@ export function renderEvolutionCenter(context: AppContext): string {
   const platforms = context.control.listPlatforms()
   const runs = context.control.listJobRuns(5)
   const health = context.control
+
+  const curation = summariseCuration(
+    context.control.listSources().map((source) => ({ source, score: scoreSource(source, sourceStats(source)) })),
+  )
 
   const cards = [
     { label: '🟢 Knowledge updates', value: summary.knowledgeUpdates, hint: 'auto-published, versioned' },
@@ -184,6 +190,32 @@ export function renderEvolutionCenter(context: AppContext): string {
         .join('\n      ')}
       </tbody>
     </table>
+  </section>
+
+  <section>
+    <h2>Source curation (${curation.total} sources)</h2>
+    <p class="sub">
+      ${curation.primary} producing · ${curation.secondary} still being judged · ${curation.quiet} answering but useless · ${curation.broken} broken.
+      A quiet source is a landing page that never states a limit: the fix is a deeper documentation path, not more requests.
+    </p>
+    ${
+      curation.attention.length === 0
+        ? '<p class="empty">Nothing needs curating right now.</p>'
+        : `<table>
+      <thead><tr><th>Source</th><th>Platform</th><th>Suggested</th><th>Why</th></tr></thead>
+      <tbody>
+      ${curation.attention
+        .map(
+          (item) => `<tr>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.platform ?? '—')}</td>
+          <td><span class="pill">${escapeHtml(item.action)}</span></td>
+          <td>${escapeHtml(item.summary)}</td>
+        </tr>`,
+        )
+        .join('\n      ')}
+      </tbody></table>`
+    }
   </section>
 
   <section>

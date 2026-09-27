@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ZodError, z } from 'zod'
-import { buildHealthReport } from '@creator-mall/core'
+import { buildHealthReport, scoreSource, summariseCuration } from '@creator-mall/core'
 import type { AppContext } from '../context.js'
 import {
   applyProposalDecision,
@@ -17,7 +17,7 @@ import {
   platformView,
 } from './views.js'
 import { renderEvolutionCenter } from './evolution-center.js'
-import { runResearchCycle } from '../world-engine/pipeline.js'
+import { runResearchCycle, sourceStats } from '../world-engine/pipeline.js'
 import {
   creatorOverview,
   draftForCreator,
@@ -93,34 +93,54 @@ export function createApp(context: AppContext): Express {
   })
 
   app.get('/api/sources', (_request, response) => {
-    const events = context.control.listEvents()
-    const versions = [...context.control.knowledge.versions.values()]
+    const now = Date.now()
+    const sources = context.control.listSources()
+    const scored = sources.map((source) => ({ source, score: scoreSource(source, sourceStats(source), now) }))
+
     response.json({
-      sources: context.control.listSources().map((source) => {
-        // How much this source has actually contributed, so an operator can see
-        // which registry entries are earning their place.
-        const signalCount =
-          events.filter((event) => event.sourceIds.includes(source.id)).length +
-          versions.filter((version) => version.sourceIds.includes(source.id)).length
-        return {
-          id: source.id,
-          name: source.name,
-          url: source.url,
-          domain: source.domain,
-          sourceType: source.sourceType,
-          platform: source.platform,
-          trustLevel: source.trustLevel,
-          active: source.active,
-          lastStatus: source.lastStatus,
-          lastCheckedAt: source.lastCheckedAt,
-          nextCheckAt: source.nextCheckAt,
-          consecutiveFailures: source.consecutiveFailures,
-          lastError: source.lastError ?? null,
-          signalCount,
-          yield: signalCount > 0 ? 'PRODUCING' : source.lastStatus === 'NEVER_CHECKED' ? 'UNKNOWN' : 'QUIET',
-        }
-      }),
+      curation: summariseCuration(scored),
+      sources: scored.map(({ source, score }) => ({
+        id: source.id,
+        name: source.name,
+        url: source.url,
+        domain: source.domain,
+        sourceType: source.sourceType,
+        platform: source.platform,
+        trustLevel: source.trustLevel,
+        active: source.active,
+        lastStatus: source.lastStatus,
+        lastCheckedAt: source.lastCheckedAt,
+        nextCheckAt: source.nextCheckAt,
+        consecutiveFailures: source.consecutiveFailures,
+        lastError: source.lastError ?? null,
+        tier: score.tier,
+        score: score.score,
+        action: score.action,
+        summary: score.summary,
+        reasons: score.reasons,
+        stats: sourceStats(source),
+      })),
     })
+  })
+
+  // Retiring a source stops the requests but keeps the knowledge it produced.
+  const curationSchema = z.object({ active: z.boolean() })
+
+  app.post('/api/admin/sources/:sourceId/curation', (request, response, next) => {
+    try {
+      const body = curationSchema.parse(request.body ?? {})
+      const source = context.control.getSource(request.params.sourceId ?? '')
+      if (!source) return response.status(404).json({ error: 'unknown source' })
+
+      const updated = context.control.upsertSource({ ...source, active: body.active })
+      return response.json({
+        sourceId: updated.id,
+        active: updated.active,
+        score: scoreSource(updated, sourceStats(updated)),
+      })
+    } catch (error) {
+      return next(error)
+    }
   })
 
   app.get('/api/evolution/summary', (_request, response) => {

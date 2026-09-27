@@ -1,5 +1,8 @@
 import {
+  EMPTY_SOURCE_STATS,
   HeuristicFactExtractor,
+  schedulePriority,
+  scoreSource,
   assessSources,
   diffSnapshots,
   emptyPlatformState,
@@ -29,11 +32,12 @@ import type {
   StateDelta,
   VerifiedClaim,
 } from '@creator-mall/core'
-import type { FactExtractor } from '@creator-mall/core'
+import type { FactExtractor, SourceScore, SourceStats } from '@creator-mall/core'
 import type { ControlPlane } from '../store/control-plane.js'
 import type { PublicFetcher } from './fetcher.js'
 import { applyClaims } from './state-builder.js'
 import { discoverPlatformSignals } from './discovery.js'
+import { probeCandidatePaths } from './curation.js'
 
 export interface ResearchDeps {
   control: ControlPlane
@@ -56,6 +60,8 @@ export interface CycleResult extends ResearchJobRun {
   events: EvolutionEvent[]
   /** Short, key-free reasons the model path was skipped this cycle. */
   modelFallbacks: string[]
+  /** Documentation-path candidates probed this cycle. */
+  candidatesProbed: number
 }
 
 /**
@@ -82,6 +88,7 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
   let proposalsCreated = 0
   let knowledgePublished = 0
   const modelFallbacks: string[] = []
+  let probedCandidates = 0
 
   // §16: before auditing known platforms, look for ones we have never heard of.
   for (const event of await discoverPlatformSignals({ control, fetcher, clock })) {
@@ -90,17 +97,26 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     proposalsCreated += planAndRecord(control, event, clock)
   }
 
+  // §Phase 4: probe deeper documentation paths. A candidate starts inactive; the
+  // engine activates it only once it has actually produced something.
+  probedCandidates += await probeCandidatePaths(control, fetcher, clock)
+
   const platforms = control.listPlatforms().filter((platform) => platform.status !== 'SUNSET')
   const now = clock()
   const limit = deps.maxSourcesPerRun ?? Number.POSITIVE_INFINITY
 
+  // Sources that keep producing are checked first; quiet and broken ones wait.
+  const scores = new Map(
+    control.listSources().map((source) => [source.id, scoreSource(source, sourceStats(source), now)]),
+  )
+
   for (const platform of platforms) {
-    const due = selectSources(control.sourcesForPlatform(platform.slug), now, deps.respectSchedule !== false).slice(0, limit)
-    if (due.length === 0) continue
+    const candidates = selectSources(control.sourcesForPlatform(platform.slug), now, deps.respectSchedule !== false, scores, limit)
+    if (candidates.length === 0) continue
 
     const facts: ExtractedFact[] = []
 
-    for (const source of due) {
+    for (const source of candidates) {
       sourcesChecked += 1
       const outcome = await fetcher.fetch(source, { etag: source.etag, lastModified: source.lastModified })
 
@@ -154,6 +170,14 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     }
 
     const claims = verifyFacts(facts, control.listSources())
+    // Credit goes to the sources whose claims were actually accepted, which is
+    // what makes "is this source earning its place?" answerable.
+    recordContribution(
+      control,
+      [...new Set(claims.filter((claim) => claim.status === 'ACCEPTED').flatMap((claim) => claim.sourceIds))],
+      claims.filter((claim) => claim.status === 'ACCEPTED').length,
+      nowIso(clock),
+    )
     knowledgePublished += publishAcceptedKnowledge(control, platform, claims, clock)
 
     const previous = control.latestSnapshot(platform.id)
@@ -162,7 +186,7 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
       id: newId('snap', clock),
       platformId: platform.id,
       capturedAt: nowIso(clock),
-      sourceIds: due.map((source) => source.id),
+      sourceIds: candidates.map((source) => source.id),
       stateHash: hashState(state),
       state,
       capturedBy: 'SCHEDULED_RESEARCH',
@@ -202,10 +226,21 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     knowledgePublished,
     error: null,
     modelFallbacks: [...new Set(modelFallbacks)],
+    candidatesProbed: probedCandidates,
     events: createdEvents,
   }
   control.addJobRun(result)
   return result
+}
+
+/**
+ * What a source has actually produced, from its own record.
+ *
+ * The counters live on the source, so curation measures reality rather than a
+ * parallel tally that could drift, and the history survives a restart.
+ */
+export function sourceStats(source: Source): SourceStats {
+  return source.stats ?? EMPTY_SOURCE_STATS
 }
 
 /** Two extractors can find the same claim; the higher-confidence one wins. */
@@ -218,12 +253,26 @@ function dedupeFacts(facts: ReadonlyArray<ExtractedFact>): ExtractedFact[] {
   return [...byKey.values()]
 }
 
-function selectSources(sources: ReadonlyArray<Source>, now: number, respectSchedule: boolean): Source[] {
+function selectSources(
+  sources: ReadonlyArray<Source>,
+  now: number,
+  respectSchedule: boolean,
+  scores: ReadonlyMap<string, SourceScore>,
+  limit: number,
+): Source[] {
   return sources
-    .filter((source) =>
-      respectSchedule ? !source.nextCheckAt || new Date(source.nextCheckAt).getTime() <= now : true,
-    )
-    .sort((a, b) => (a.lastCheckedAt ?? '').localeCompare(b.lastCheckedAt ?? ''))
+    .filter((source) => (respectSchedule ? !source.nextCheckAt || new Date(source.nextCheckAt).getTime() <= now : true))
+    // Productive sources first, so a tight request budget still buys information.
+    .sort((a, b) => {
+      const byTier = schedulePriority(scores.get(a.id) ?? fallbackScore(a)) - schedulePriority(scores.get(b.id) ?? fallbackScore(b))
+      if (byTier !== 0) return byTier
+      return (a.lastCheckedAt ?? '').localeCompare(b.lastCheckedAt ?? '')
+    })
+    .slice(0, limit)
+}
+
+function fallbackScore(source: Source): SourceScore {
+  return scoreSource(source, EMPTY_SOURCE_STATS)
 }
 
 function markSource(
@@ -239,6 +288,8 @@ function markSource(
 ): Source {
   const ok = update.status === 'OK' || update.status === 'NOT_MODIFIED'
   const nextCheckHours = source.sourceType === 'DEVELOPER' || source.sourceType === 'NEWS' ? 24 : 12
+  const previous = sourceStats(source)
+
   return control.upsertSource({
     ...source,
     lastStatus: update.status,
@@ -248,7 +299,37 @@ function markSource(
     lastModified: update.lastModified ?? source.lastModified,
     consecutiveFailures: ok ? 0 : source.consecutiveFailures + 1,
     nextCheckAt: new Date(new Date(update.at).getTime() + nextCheckHours * 3_600_000).toISOString(),
+    stats: {
+      ...previous,
+      checks: previous.checks + 1,
+      successes: previous.successes + (ok ? 1 : 0),
+      failures: previous.failures + (update.status === 'FAILED' ? 1 : 0),
+      blocked: previous.blocked + (update.status === 'BLOCKED' ? 1 : 0),
+    },
   })
+}
+
+/** Credits a source with the accepted claims it actually produced. */
+function recordContribution(
+  control: ControlPlane,
+  sourceIds: ReadonlyArray<string>,
+  acceptedCount: number,
+  at: string,
+): void {
+  if (acceptedCount === 0) return
+  for (const sourceId of sourceIds) {
+    const source = control.getSource(sourceId)
+    if (!source) continue
+    const previous = sourceStats(source)
+    control.upsertSource({
+      ...source,
+      stats: {
+        ...previous,
+        factsContributed: previous.factsContributed + acceptedCount,
+        lastFactAt: at,
+      },
+    })
+  }
 }
 
 /**

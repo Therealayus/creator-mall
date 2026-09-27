@@ -1,5 +1,34 @@
 import type { SourceType, TrustLevel } from './enums.js'
 
+/**
+ * What a source has actually produced, over its whole life.
+ *
+ * Lives on the record rather than in a parallel counter, so curation can answer
+ * "is this source earning its place?" from one place, and the history survives
+ * a restart.
+ */
+export interface SourceStats {
+  checks: number
+  successes: number
+  failures: number
+  blocked: number
+  /** Accepted claims this source has contributed. */
+  factsContributed: number
+  /** Change events this source has contributed. */
+  eventsContributed: number
+  lastFactAt: string | null
+}
+
+export const EMPTY_SOURCE_STATS: SourceStats = {
+  checks: 0,
+  successes: 0,
+  failures: 0,
+  blocked: 0,
+  factsContributed: 0,
+  eventsContributed: 0,
+  lastFactAt: null,
+}
+
 /** §4: every knowledge item keeps its sources, and every source is scheduled. */
 export interface Source {
   id: string
@@ -22,6 +51,8 @@ export interface Source {
   etag?: string
   lastModified?: string
   contentHash?: string
+  /** Lifetime contribution history, used to curate the registry. */
+  stats?: SourceStats
 }
 
 export interface SourceHealth {

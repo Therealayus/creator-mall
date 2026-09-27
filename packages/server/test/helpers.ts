@@ -80,7 +80,13 @@ export async function testContext(
   overrides: Partial<AppContext['config']> = {},
   fallback?: Parameters<typeof scriptedFetch>[1],
 ): Promise<AppContext> {
-  return createContext({ RESEARCH_ENABLED: false, ...overrides }, { fetchImpl: scriptedFetch(routes, fallback) })
+  return createContext(
+    // Per-host rate limiting is real behaviour and is tested directly in the
+    // fetcher suite; repeating it between scripted hosts would just make the
+    // suite slow without testing anything new.
+    { RESEARCH_ENABLED: false, FETCH_MIN_HOST_GAP_MS: 0, ...overrides },
+    { fetchImpl: scriptedFetch(routes, fallback) },
+  )
 }
 
 /**
