@@ -1,0 +1,20 @@
+{
+  "name": "@creator-mall/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Domain intelligence for Creator Mall: capability registry, snapshot diffing, verification, impact analysis, evolution planning.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "creator-mall",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Adaptive intelligence platform for the creator economy: continuously observes the changing social-media ecosystem and evolves creator tools, knowledge, workflows and integrations through a controlled software lifecycle.",
+  "workspaces": [
+    "packages/core",
+    "packages/server"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @creator-mall/core && npm run build --workspace @creator-mall/server",
+    "typecheck": "npm run typecheck --workspace @creator-mall/core && npm run typecheck --workspace @creator-mall/server",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "npm run build --workspace @creator-mall/core && node --import tsx --test \"packages/*/test/**/*.test.ts\"",
+    "test:watch": "node --import tsx --test --watch \"packages/*/test/**/*.test.ts\"",
+    "dev": "npm run dev --workspace @creator-mall/server",
+    "start": "node packages/server/dist/index.js",
+    "seed": "npm run seed --workspace @creator-mall/server",
+    "engine:once": "npm run engine:once --workspace @creator-mall/server",
+    "verify": "npm run lint && npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "@types/node": "^20.17.6",
+    "eslint": "^9.15.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.16.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

@@ -1,0 +1,214 @@
+# Architecture
+
+This document maps the Creator Mall architecture onto the code that exists today, and
+records the design decisions that are not obvious from the code itself.
+
+## 1. Three engines, one control plane
+
+```
+                         CREATOR MALL
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+  CREATOR ENGINE        WORLD ENGINE          MARKET ENGINE
+  (Phase 2)              (Phase 1)             (Phase 2)
+        │                     │                     │
+        └─────────────────────┼─────────────────────┘
+                              ▼
+                      CONTROL PLANE
+                  (server/src/store/control-plane.ts)
+                              ▼
+                    EVOLUTION ENGINE
+                              ▼
+                         EVOLUTION CENTER
+```
+
+The **control plane** is a single in-process store that both engines read and write. It is
+framework-free on purpose: engines are testable without HTTP, and the API is testable
+without a scheduler. `ControlPlaneState` is plain JSON, which is also the persistence
+format (`FilePersistence`, atomic temp-file + rename) and the seam where Postgres arrives
+in Phase 2.
+
+## 2. The capability graph, not a platform switchboard
+
+`core/src/capabilities/taxonomy.ts` defines capabilities as **product concepts**
+(`SHORT_VIDEO`, `CAROUSEL`, `SCHEDULING`, `API_PUBLISH`), each with a domain, the surfaces
+it appears on, and the language signals that identify it in source text.
+
+`CapabilityRegistry` is **open**: when the Evolution Engine verifies a genuinely new
+format, it registers a new definition at runtime (`proposeFromSignal`) rather than
+requiring a code change. Application code never asks "which platform is this?" — it asks
+"which capabilities are active?".
+
+Consequences:
+
+| Concern | Mechanism |
+| --- | --- |
+| Creation flow (§20) | `buildPlatformUiConfig` renders options from active capabilities |
+| Publishing (§41) | `PlatformAdapter.validateContent` checks the capability exists, then its limits |
+| Impact (§28) | `scoreCreatorImpact` scores creator × capability overlap |
+| Readiness (§17) | `buildReadinessProfile` scores areas from capabilities + adapter + sources |
+
+## 3. Snapshots, diffs and risk
+
+`PlatformState` is a bag of JSON areas (`capabilities`, `limits`, `mediaSpecs`,
+`publishing`, `api`, `analytics`, `monetization`, `requirements`, `policies`, `notes`)
+rather than a fixed schema. Adding a new observation area needs no migration.
+
+```
+previous snapshot ──┐
+                    ├─► diffValues (structural, leaf level) ─► classifyDelta ─► StateDelta[]
+current snapshot  ──┘
+```
+
+`classifyDelta` is rule-based and explainable. Every delta carries a category, a risk level
+and a human-readable rationale, because §35 requires the product to answer "why did this
+change?".
+
+Two risk rules matter most:
+
+- **tightening a limit is HIGH, loosening it is MEDIUM** — tightening can invalidate
+  content that already passed validation;
+- **an API deprecation is CRITICAL** — integrations break without warning, and if it
+  touches auth it also triggers workflow pause and a security review.
+
+The first snapshot for a platform is a **baseline, not a change**. No event is fabricated
+from initial knowledge.
+
+## 4. Merge, never subtract
+
+`applyClaims` builds the next state by **merging verified claims into the previous state**.
+If a fact stops appearing on a page, it is not deleted.
+
+Inferring removal from absence is the single most dangerous thing a monitoring system can
+do: documentation gets reorganised, sections move, pages get reorganised. Capabilities are
+withdrawn only when a source explicitly states a removal or deprecation. Every other
+absence is a non-event.
+
+## 5. The verification gate
+
+```
+source page ─► extract facts ─► group by claim key ─► assess sources ─► ACCEPTED | WATCH | REJECTED
+```
+
+- `assessSources` weights source type, assigned trust, and **independence** (distinct
+  domains), so one official page is `OFFICIAL`, two independent reports are `VERIFIED`, one
+  report is `REPORTED`, community discussion is `COMMUNITY_SIGNAL`.
+- `detectRumour` downgrades any claim whose *wording* is hearsay — "rumoured", "sources say",
+  "allegedly" — to `RUMOR` regardless of how official the page is. An official blog post
+  repeating a rumour is still a rumour.
+- Only `ACCEPTED` and `WATCH` claims enter knowledge. Rejected claims stay in the event log
+  as signals.
+
+## 6. Knowledge that decays
+
+`KnowledgeDocument → KnowledgeVersion → KnowledgeChunk → KnowledgeFact`, with TTLs by
+policy (`API_INFO` 7 days, `PLATFORM_LIMIT` 14, `PLATFORM_POLICY` 30, `PLATFORM_GENERAL`
+90, `HISTORICAL` permanent).
+
+- Publishing a new observation creates version *N+1*; version *N* becomes `SUPERSEDED` and
+  is retained.
+- Expiry **marks** knowledge stale; it never deletes it.
+- Retrieval prefers current, fresh, high-trust chunks. If nothing current matches, it
+  returns stale results with an explicit `degraded` notice rather than a confident answer.
+
+Embeddings default to a deterministic local hashed-bag-of-words provider
+(`LocalHashEmbeddingProvider`). The retrieval, freshness and deactivation paths are
+therefore fully testable offline, with no API key and no data leaving the machine.
+
+## 7. Evolution: proposals, not deployments
+
+`planEvolution` converts a verified event into `ChangeProposal` records containing
+machine-checkable `ProposalAction`s, an affected-component list from the dependency graph,
+and a test plan. It never edits production code.
+
+```
+                ┌──────────────┬──────────────┬───────────────┐
+knowledge only  │ new format   │ API change   │ critical      │
+LOW             │ MEDIUM       │ HIGH         │ CRITICAL      │
+AUTO_APPROVED   │ PENDING_REVIEW              │ + SECURITY_REVIEW
+                └──────────────┴──────────────┴───────────────┘
+```
+
+`applyProposalDecision` applies only the **safe** subset on approval — knowledge documents
+and capability metadata. Code, migrations, security and publishing actions are recorded for
+CI and still require a controlled deployment.
+
+`DependencyGraph` is the machine-readable blast radius (§25):
+`Platform → Capability → Content type → Prompt → Template / Editor / Publisher / Analytics / Docs`.
+`blastRadius` answers "what else does this touch?" without a hand-maintained list.
+
+## 8. Unknown platforms are first-class
+
+`UnavailablePlatformAdapter` (§42) represents a platform with no integration. It reports
+known capabilities, validates content against known limits, and **refuses to publish with an
+explanation** rather than pretending to work. `AdapterRegistry.resolve` never returns null,
+so "no adapter" can never be mistaken for "no platform".
+
+Discovery (`discovery.ts`) scans news and community sources for platform announcements,
+validates identity and source quality, and registers a watchlist entry with status
+`DISCOVERED`. A discovered platform is never made publishable from that code path.
+
+`buildReadinessProfile` scores a platform across content generation, image/video support,
+adapter, publishing API, analytics API, knowledge coverage and template library — so the
+product can be *ready* for a platform the day it opens its API.
+
+## 9. Failure behaviour
+
+`runResearchCycle` records what it did even when things go wrong:
+
+| Failure | Behaviour |
+| --- | --- |
+| Fetch 5xx / timeout | source marked `FAILED`, retry next cycle, knowledge retained |
+| Fetch blocked (robots / allowlist) | source marked `BLOCKED`, never retried aggressively |
+| 304 not modified | no snapshot delta, no cost |
+| Whole cycle throws | job run recorded as `FAILED`, scheduler backs off, nothing deleted |
+| Platform disappears from a page | **no** capability removal inferred |
+
+`buildHealthReport` turns this into one honest number per subsystem, so degradation is
+visible in the Evolution Center instead of silent.
+
+## 10. Data model (future-proof)
+
+There are no `instagramPostId` / `youtubePostId` columns anywhere. Platform-specific data
+lives in generic structures:
+
+- `SocialPlatform` — identity, status, declared capabilities, integration state
+- `Source` — registry with trust, schedule, health, validators
+- `PlatformSnapshot` — immutable point-in-time `PlatformState`
+- `EvolutionEvent` — the change log, with deltas, evidence, risk, status
+- `ChangeProposal` — reviewable work with actions, affected components, test plan
+- `KnowledgeDocument/Version/Chunk/Fact` — versioned, attributed, expiring knowledge
+- `PublishedContent` + `PlatformContentReference` (Phase 2) — future-proof publishing
+
+## 11. Phase 1 API surface
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/health` | per-subsystem health + alerts |
+| `GET /api/platforms` | platform directory |
+| `GET /api/platforms/:id` | capabilities, readiness, UI config, timeline, knowledge |
+| `GET /api/platforms/:id/timeline` | creator-visible evolution timeline |
+| `GET /api/platforms/:id/why?capability=` | "why did this change?" with sources |
+| `GET /api/sources` | source registry with health |
+| `GET /api/evolution/summary` | Evolution Center counters |
+| `GET /api/evolution/events` | change log |
+| `GET /api/evolution/proposals` | staged changes |
+| `POST /api/evolution/proposals/:id/decision` | approve / reject |
+| `GET /api/knowledge/search?q=` | answers from maintained knowledge |
+| `GET /api/knowledge/documents` | versions, TTLs, source attribution |
+| `GET /api/creator/:id/updates` | creator-facing alerts, no jargon |
+| `POST /api/admin/research/run` | trigger one cycle (token-guarded) |
+| `GET /evolution-center` | operator dashboard (server-rendered) |
+
+## 12. Deliberate non-goals in Phase 1
+
+- **No AI writes code.** Not by policy, by architecture: there is no code-generation path
+  in the repo.
+- **No fine-tuning.** Adaptation happens through knowledge retrieval, configuration
+  evolution, prompt versioning, the capability registry and evaluation — not by retraining
+  a model on user data.
+- **No creator web app yet.** The UI *model* (`PlatformUiConfig`) is complete and tested;
+  the React creation flow that consumes it is Phase 2.
+- **No real publishing adapters.** The registry, the contract and the honest unavailable
+  implementation exist; live platform integrations are Phase 2 work gated on verified APIs.

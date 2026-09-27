@@ -1,1 +1,166 @@
+<<<<<<< HEAD
 # creator-mall
+=======
+# Creator Mall
+
+**The mall that never closes.**
+
+Creator Mall is an adaptive intelligence platform for the creator economy. Instead of
+hardcoding a list of platforms and their features, it continuously observes the
+creator ecosystem, verifies what it finds against trusted sources, understands the
+impact on creators, and evolves its own knowledge, capabilities, prompts, templates and
+integration plans through a controlled software lifecycle.
+
+> The creator ecosystem changes. Creator Mall changes with it.
+
+---
+
+## What is in this repository
+
+Phase 1 of the architecture: the intelligence spine, working and tested end to end.
+
+```
+packages/
+  core/     pure decision logic — no I/O, no framework, fully unit tested
+  server/   World Engine workers, Evolution Center API, platform adapter registry
+```
+
+| Concern | Where it lives |
+| --- | --- |
+| Capability taxonomy + open registry | `core/src/capabilities` |
+| Platform snapshots + structural diff + risk classification | `core/src/diff` |
+| HTML reading + fact extraction | `core/src/extract` |
+| Source trust + multi-source verification gate | `core/src/verify` |
+| Knowledge versioning, TTL, retrieval, offline embeddings | `core/src/knowledge` |
+| Feature dependency graph, impact engine, evolution planner, readiness | `core/src/evolution` |
+| Config-driven UI model (no `if (platform === ...)`) | `core/src/ui` |
+| Prompt versioning | `core/src/prompts` |
+| Permitted-source fetcher (allowlist, robots, conditional GET) | `server/src/world-engine/fetcher.ts` |
+| Continuous research cycle + change detection | `server/src/world-engine/pipeline.ts` |
+| New-platform discovery | `server/src/world-engine/discovery.ts` |
+| Scheduler with safe failure behaviour | `server/src/world-engine/scheduler.ts` |
+| Platform adapters (including "unknown platform") | `server/src/adapters` |
+| Evolution Center API + admin dashboard | `server/src/api` |
+
+## Quick start
+
+```bash
+npm install
+npm run verify        # lint + typecheck + tests (67 tests)
+npm run dev           # http://127.0.0.1:4000
+```
+
+Then open:
+
+- `http://127.0.0.1:4000/evolution-center` — internal operator dashboard
+- `http://127.0.0.1:4000/api/platforms` — platform directory
+- `http://127.0.0.1:4000/api/platforms/instagram` — capability-driven platform view
+- `http://127.0.0.1:4000/api/platforms/instagram/why?capability=SHORT_VIDEO` — "why did this change?"
+- `http://127.0.0.1:4000/api/knowledge/search?q=maximum+video+length` — maintained-knowledge answers
+- `http://127.0.0.1:4000/api/health` — system health
+
+Run one research cycle against real documentation:
+
+```bash
+npm run engine:once
+```
+
+The World Engine never runs on its own unless you ask it to:
+
+```bash
+RESEARCH_ENABLED=true RESEARCH_INTERVAL_MS=900000 npm run dev
+```
+
+## The core idea
+
+Nothing in the product branches on a platform name. A platform is described entirely by
+**which capabilities it declares**, and capabilities are product concepts
+(`SHORT_VIDEO`, `CAROUSEL`, `SCHEDULING`, `API_PUBLISH`).
+
+That single decision is what makes the system future-proof:
+
+- a newly discovered platform is representable before any integration exists;
+- a new capability appears in the creation flow without a redesign;
+- a withdrawn capability disappears with an explanation, never as a dead button;
+- impact on a creator is computed from what *they* actually use.
+
+## Controlled autonomy
+
+The system is not an AI that rewrites itself. It is a product that detects change and
+routes it through a software lifecycle.
+
+| Automatic | Controlled (tests + review + deployment) |
+| --- | --- |
+| Research, verification, change detection | Code changes |
+| Knowledge updates (versioned, with TTLs) | Database migrations |
+| Platform discovery and watchlisting | Security and authentication changes |
+| Impact analysis and personalised alerts | Publishing integrations |
+| Feature, template and prompt *proposals* | Production deployments |
+| Regression test plans | Production UI architecture |
+
+Every change is classified `LOW → MEDIUM → HIGH → CRITICAL`. Low-risk knowledge refreshes
+publish themselves. A critical API or authentication change raises an alert, pauses the
+affected workflow and waits for a human. Nothing deploys itself.
+
+## Research is permitted, not invasive
+
+The fetcher is deliberately conservative:
+
+- only hosts on `ALLOWED_HOSTS` are read;
+- `robots.txt` is honoured;
+- one request per host per `FETCH_MIN_HOST_GAP_MS`;
+- hard timeout, hard byte cap, text content types only;
+- conditional requests (`ETag` / `If-Modified-Since`), so unchanged pages cost nothing.
+
+When a source stops responding, existing knowledge is **kept and marked stale**. The
+platform degrades visibly instead of pretending to know things.
+
+## Knowledge, not model memory
+
+Answers about current platform behaviour come from the maintained knowledge system, with
+fact-level source attribution, verification timestamps, confidence, TTLs and full version
+history. Superseded knowledge is never overwritten — it is marked and retained.
+
+Embeddings ship as a deterministic local provider so retrieval, freshness and
+deactivation paths are fully testable offline, with no API key and no data leaving the
+machine. A hosted vector model plugs in behind the same interface.
+
+## Creator-facing language
+
+Creators see *Platform Support*, *Latest Updates*, *What's Changed* and *Coming Soon*.
+Capability registries, adapters, crawlers, embeddings and evolution events stay inside the
+Evolution Center. The creator-facing API surface is covered by a test that fails if
+internal jargon leaks into it.
+
+## Configuration
+
+See `.env.example`. Notable values:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `RESEARCH_ENABLED` | `false` | run the World Engine loop |
+| `RESEARCH_INTERVAL_MS` | `900000` | cadence between cycles |
+| `ALLOWED_HOSTS` | *(empty = all)* | comma-separated hosts the engine may read |
+| `ADMIN_TOKEN` | *(empty)* | bearer token for `/api/admin/*`; required in production |
+| `DATA_DIR` | *(empty = memory)* | directory for the control-plane JSON snapshot |
+| `RESPECT_ROBOTS` | `true` | honour robots.txt |
+
+## Status
+
+| Area | State |
+| --- | --- |
+| World Engine: fetch → verify → detect → understand → plan | implemented, tested |
+| Knowledge: versioning, TTL, retrieval, evidence | implemented, tested |
+| Evolution Center: events, proposals, approvals, health | implemented, tested |
+| Creator impact + notifications | implemented, tested |
+| Config-driven UI model + platform readiness | implemented, tested |
+| Prompt versioning | implemented, tested |
+| Creator web app (React creation flow) | Phase 2 |
+| Postgres persistence, real publishing adapters, hosted embeddings | Phase 2 |
+
+See `docs/PHASE-1.md` for the full scope and `ARCHITECTURE.md` for the design.
+
+## License
+
+Private. All rights reserved.
+>>>>>>> 33bb30a (Phase 1: Creator Mall intelligence spine)

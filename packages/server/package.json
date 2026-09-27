@@ -1,0 +1,27 @@
+{
+  "name": "@creator-mall/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Creator Mall control plane: World Engine workers, Evolution Center API, platform adapter registry.",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "seed": "tsx src/scripts/seed.ts",
+    "engine:once": "tsx src/scripts/run-engine-once.ts"
+  },
+  "dependencies": {
+    "@creator-mall/core": "*",
+    "cors": "^2.8.5",
+    "express": "^4.21.1",
+    "helmet": "^8.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21"
+  }
+}
