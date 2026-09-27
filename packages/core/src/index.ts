@@ -56,6 +56,8 @@ export * from './generation/model-copy.js'
 
 export * from './market/catalogue.js'
 
+export * from './evolution/regression.js'
+
 export * from './composer/draft.js'
 
 export * from './auth/password.js'

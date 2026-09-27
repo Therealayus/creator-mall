@@ -67,6 +67,8 @@ export interface CycleResult extends ResearchJobRun {
   candidatesProbed: number
   /** Chunks re-embedded after knowledge changed. */
   embeddingsRefreshed: number
+  /** Prompt versions and templates drafted from verified changes. */
+  draftsCreated: number
 }
 
 /**
@@ -91,6 +93,7 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
   let sourcesFailed = 0
   let snapshotsCreated = 0
   let proposalsCreated = 0
+  let draftsCreated = 0
   let knowledgePublished = 0
   const modelFallbacks: string[] = []
   let probedCandidates = 0
@@ -99,7 +102,9 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
   for (const event of await discoverPlatformSignals({ control, fetcher, clock })) {
     control.addEvent(event)
     createdEvents.push(event)
-    proposalsCreated += planAndRecord(control, event, clock)
+    const planned = planAndRecord(control, event, clock)
+    proposalsCreated += planned.proposals
+    draftsCreated += planned.drafts
   }
 
   // §Phase 4: probe deeper documentation paths. A candidate starts inactive; the
@@ -208,7 +213,9 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     for (const event of buildEvents({ control, platform, diff, claims, clock })) {
       control.addEvent(event)
       createdEvents.push(event)
-      proposalsCreated += planAndRecord(control, event, clock)
+      const planned = planAndRecord(control, event, clock)
+    proposalsCreated += planned.proposals
+    draftsCreated += planned.drafts
       notifyCreators(control, event, clock)
     }
   }
@@ -238,6 +245,7 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     snapshotsCreated,
     eventsCreated: createdEvents.length,
     proposalsCreated,
+    draftsCreated,
     knowledgePublished,
     error: null,
     modelFallbacks: [...new Set(modelFallbacks)],
@@ -575,7 +583,11 @@ function topicOf(path: string): string {
     .trim()
 }
 
-function planAndRecord(control: ControlPlane, event: EvolutionEvent, clock: () => number): number {
+function planAndRecord(
+  control: ControlPlane,
+  event: EvolutionEvent,
+  clock: () => number,
+): { proposals: number; drafts: number } {
   const knowledgeOnly = event.category === 'DOCUMENTATION_CHANGE' && event.riskLevel === 'LOW'
 
   const proposals = planEvolution({
@@ -601,7 +613,96 @@ function planAndRecord(control: ControlPlane, event: EvolutionEvent, clock: () =
     control.addProposal({ ...proposal, affectedComponents: affected })
     event.affectedComponents = affected
   }
-  return proposals.length
+  const drafts = draftForChange(control, event, clock)
+  return { proposals: proposals.length, drafts }
+}
+
+/**
+ * A verified change drafts the next prompt and template for what it touched.
+ *
+ * This used to be missing entirely: the drafting code existed and was never
+ * called, so a platform changed and the system carried on writing the way it
+ * always had. Drafts are never activated here. They sit in DRAFT and PROPOSED
+ * until the regression runner has something to say about them.
+ */
+function draftForChange(control: ControlPlane, event: EvolutionEvent, clock: () => number): number {
+  if (!event.platformId) return 0
+  const platform = control.getPlatform(event.platformId)
+  if (!platform) return 0
+
+  const requirements = requirementsFrom(event)
+  if (requirements.length === 0) return 0
+
+  let draftedCount = 0
+  for (const capabilityKey of event.affectedCapabilityKeys) {
+    const definition = control.capabilities.get(capabilityKey)
+    if (!definition) continue
+    const promptKey = `${platform.slug}:${capabilityKey}:generation`
+
+    // One draft per change, so a re-run of the same cycle does not pile up
+    // versions of the same prompt.
+    const alreadyDrafted = control.prompts
+      .versions(promptKey)
+      .some((version) => version.basedOnEventId === event.id && version.status === 'DRAFT')
+    if (alreadyDrafted) continue
+
+    control.prompts.draftNext({
+      promptKey,
+      platformId: platform.id,
+      category: event.category,
+      changeSummary: event.creatorSummary,
+      requirements,
+      basedOnEventId: event.id,
+      clock,
+    })
+    draftedCount += 1
+
+    const templateId = `${platform.slug}:${capabilityKey}:default`
+    if (!control.listTemplates(platform.id).some((entry) => entry.id === templateId)) {
+      control.addTemplate({
+        id: templateId,
+        platformId: platform.id,
+        capabilityKey,
+        name: `${platform.name} ${definition.label}`,
+        structure: seedStructureFor(definition.label, requirements),
+        hook: null,
+        cta: null,
+        // Proposed, never active: a template changes what creators see, so it
+        // waits for a person.
+        status: 'PROPOSED',
+        createdBy: 'WORLD_ENGINE',
+        createdAt: nowIso(clock),
+        basedOnEventId: event.id,
+      })
+      draftedCount += 1
+    }
+  }
+  return draftedCount
+}
+
+/** Turns a change's deltas into instructions a writer can actually follow. */
+function requirementsFrom(event: EvolutionEvent): string[] {
+  const requirements: string[] = []
+  for (const delta of event.deltas) {
+    if (delta.kind === 'REMOVED') {
+      requirements.push(`The platform no longer offers ${delta.path}. Do not mention it.`)
+      continue
+    }
+    if (delta.after === null || delta.after === undefined) continue
+    requirements.push(`Adapt to the change at ${delta.path}: it is now ${JSON.stringify(delta.after)}.`)
+  }
+  return requirements
+}
+
+function seedStructureFor(capabilityLabel: string, requirements: string[]): string {
+  return [
+    `Hook: the result the creator wants, in one line.`,
+    `Body: the ${capabilityLabel.toLowerCase()} itself, concrete and specific.`,
+    `Close: one clear next step.`,
+    '',
+    'Verified requirements:',
+    ...requirements.map((requirement) => `- ${requirement}`),
+  ].join('\n')
 }
 
 /** §29: only creators the change actually affects are notified. */

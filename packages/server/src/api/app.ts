@@ -31,6 +31,7 @@ import type { AssetKind } from '@creator-mall/core'
 import { forgetPreference, resetPersonalization, setPreferenceEnabled } from '@creator-mall/core'
 import { assetView, generate, generationRequestSchema } from '../creator-engine.js'
 import { observationSchema, personalisationFor, recordCreatorObservation } from './creator.js'
+import { activatePromptVersion, evaluatePromptVersion } from '../evolution/regression-service.js'
 
 export function createApp(context: AppContext): Express {
   const app = express()
@@ -162,10 +163,92 @@ export function createApp(context: AppContext): Express {
     response.json({ proposals: context.control.listProposals(status ? { status } : {}) })
   })
 
-  const decisionSchema = z.object({
+  const activationSchema = z.object({
+  /**
+   * A person may overrule a failed or incomplete run, but the override is
+   * recorded as an override, never as a pass.
+   */
+  override: z.boolean().default(false),
+  actor: z.string().min(1).max(120).default('admin'),
+})
+
+const decisionSchema = z.object({
     decision: z.enum(['approve', 'reject']),
     actor: z.string().min(1).max(120).default('admin'),
     note: z.string().max(2000).nullish(),
+  })
+
+  app.get('/api/evolution/prompts', (_request, response) => {
+    const prompts = context.control.prompts.all().map((version) => ({
+      promptKey: version.promptKey,
+      version: version.version,
+      status: version.status,
+      platformId: version.platformId,
+      basedOnEventId: version.basedOnEventId,
+      changeNote: version.changeNote,
+      evaluated: version.evaluationScore !== null,
+      evaluationScore: version.evaluationScore,
+      createdAt: version.createdAt,
+      activatedAt: version.activatedAt,
+    }))
+    response.json({ prompts })
+  })
+
+  /**
+   * Run a drafted prompt against the checks its change implies, and refuse to
+   * activate anything that has not passed them.
+   */
+  app.post('/api/evolution/prompts/:promptKey/versions/:version/evaluate', (request, response, next) => {
+    void (async () => {
+      try {
+        const promptKey = decodeURIComponent(request.params.promptKey ?? '')
+        const versionNumber = Number(request.params.version ?? '')
+        if (!Number.isInteger(versionNumber)) {
+          return response.status(400).json({ error: 'That version number is not valid.' })
+        }
+        const result = await evaluatePromptVersion(context, promptKey, versionNumber)
+        if (!result) return response.status(404).json({ error: 'We have no such prompt version.' })
+        return response.json({
+          report: result.report,
+          riskLevel: result.riskLevel,
+          activation: result.activation,
+          cases: result.cases.map((entry) => ({ id: entry.id, expectation: entry.expectation })),
+        })
+      } catch (error) {
+        return next(error)
+      }
+    })()
+  })
+
+  app.post('/api/evolution/prompts/:promptKey/versions/:version/activate', (request, response, next) => {
+    try {
+      const promptKey = decodeURIComponent(request.params.promptKey ?? '')
+      const versionNumber = Number(request.params.version ?? '')
+      if (!Number.isInteger(versionNumber)) {
+        return response.status(400).json({ error: 'That version number is not valid.' })
+      }
+      const body = activationSchema.parse(request.body ?? {})
+      const result = activatePromptVersion(context, promptKey, versionNumber, {
+        override: body.override,
+        decidedBy: body.actor,
+      })
+      if (!result.activation.allowed) {
+        return response.status(409).json({
+          error: result.activation.reason,
+          refusal: result.activation.refusal,
+          overridden: false,
+        })
+      }
+      return response.json({
+        activated: true,
+        overridden: result.activation.overridden,
+        reason: result.activation.reason,
+        refusal: result.activation.refusal,
+        version: result.version?.version ?? versionNumber,
+      })
+    } catch (error) {
+      return next(error)
+    }
   })
 
   app.post('/api/evolution/proposals/:proposalId/decision', (request, response, next) => {
