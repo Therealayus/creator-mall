@@ -7,8 +7,8 @@ import { MemoryPersistence } from './store/persistence.js'
 import type { ControlPlaneState, PersistencePort } from './store/persistence.js'
 import { PublicFetcher } from './world-engine/fetcher.js'
 import { SEED_PLATFORMS, seedSources } from './world-engine/seed.js'
-import { nowIso, stableId } from '@creator-mall/core'
-import type { SocialPlatform } from '@creator-mall/core'
+import type { CreatorProfile, SocialPlatform } from '@creator-mall/core'
+import { nowIso, seedTemplateFor, stableId } from '@creator-mall/core'
 
 export interface AppContext {
   config: Config
@@ -17,6 +17,12 @@ export interface AppContext {
   fetcher: PublicFetcher
   persistence: PersistencePort
   startedAt: string
+  /**
+   * Which creator the web app is acting as. Phase 2 has no accounts yet, so this
+   * is the seeded demo creator unless CREATOR_ID selects another one. Replaced by
+   * real sessions in Phase 3.
+   */
+  creatorSession: () => CreatorProfile | undefined
 }
 
 /**
@@ -46,7 +52,26 @@ export async function createContext(
     fetcher,
     persistence,
     startedAt: nowIso(),
+    creatorSession: () => {
+      if (config.CREATOR_ID) {
+        const selected = control.getCreator(config.CREATOR_ID)
+        if (selected) return selected
+      }
+      return control.listCreators()[0]
+    },
   }
+}
+
+/** The demo creator that makes the creator-facing surface usable on first run. */
+export const DEMO_CREATOR: CreatorProfile = {
+  id: 'cr_demo_video_creator',
+  displayName: 'Demo video creator',
+  platformSlugs: ['youtube', 'instagram', 'tiktok'],
+  contentTypes: ['SHORT_VIDEO', 'LONG_VIDEO'],
+  usedCapabilityKeys: ['SHORT_VIDEO', 'LONG_VIDEO', 'VIDEO_MEDIA', 'SCHEDULING', 'ANALYTICS'],
+  goals: ['grow reach', 'publish more often'],
+  locales: ['en'],
+  createdAt: '2026-01-01T00:00:00.000Z',
 }
 
 export function seedControlPlane(control: ControlPlane, at: string = nowIso()): void {
@@ -70,11 +95,37 @@ export function seedControlPlane(control: ControlPlane, at: string = nowIso()): 
     }
     control.upsertPlatform(platform)
     linkPlatformDependencies(control, platform)
+    seedTemplates(control, platform, at)
   }
 
   for (const source of seedSources(SEED_PLATFORMS, at)) {
     if (control.getSource(source.id)) continue
     control.upsertSource(source)
+  }
+
+  if (!control.getCreator(DEMO_CREATOR.id)) {
+    control.upsertCreator({ ...DEMO_CREATOR, createdAt: at })
+  }
+}
+
+/**
+ * One prepared structure per content capability, so the creation flow is useful on
+ * day one. New capabilities get their own structure when a change is verified.
+ */
+export function seedTemplates(control: ControlPlane, platform: SocialPlatform, at: string): void {
+  for (const capabilityKey of platform.capabilityKeys) {
+    const definition = control.capabilities.get(capabilityKey)
+    if (!definition || definition.domain !== 'CONTENT') continue
+    const template = seedTemplateFor({
+      platformId: platform.id,
+      platformSlug: platform.slug,
+      platformName: platform.name,
+      capabilityKey,
+      capabilityLabel: definition.label,
+      createdAt: at,
+    })
+    if (control.listTemplates(platform.id).some((entry) => entry.id === template.id)) continue
+    control.addTemplate(template)
   }
 }
 

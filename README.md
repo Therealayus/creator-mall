@@ -17,12 +17,15 @@ integration plans through a controlled software lifecycle.
 
 ## What is in this repository
 
-Phase 1 of the architecture: the intelligence spine, working and tested end to end.
+Phases 1 and 2: the intelligence spine, plus the creator product that sits on top of it. Both
+are working and tested end to end.
 
 ```
 packages/
   core/     pure decision logic — no I/O, no framework, fully unit tested
-  server/   World Engine workers, Evolution Center API, platform adapter registry
+  server/   World Engine workers, Evolution Center API, creator API, platform adapters
+apps/
+  web/      creator-facing web app (React + Vite) rendered from capability data
 ```
 
 | Concern | Where it lives |
@@ -41,23 +44,35 @@ packages/
 | Scheduler with safe failure behaviour | `server/src/world-engine/scheduler.ts` |
 | Platform adapters (including "unknown platform") | `server/src/adapters` |
 | Evolution Center API + admin dashboard | `server/src/api` |
+| Creator-facing API, in plain language only | `server/src/api/creator.ts` |
+| Deterministic, capability-aware draft composer | `core/src/composer` |
+| Creator web app (creation flow, updates, platform support) | `apps/web` |
 
 ## Quick start
 
 ```bash
 npm install
-npm run verify        # lint + typecheck + tests (67 tests)
-npm run dev           # http://127.0.0.1:4000
+npm run verify        # lint + typecheck + 115 tests
+npm run dev           # api on :4000, web on :5173
 ```
 
 Then open:
 
+- `http://127.0.0.1:5173` — the creator app (What's changed, Create, Platform support, Your updates, Coming soon)
 - `http://127.0.0.1:4000/evolution-center` — internal operator dashboard
+- `http://127.0.0.1:4000/api/creator/overview` — the creator-facing data, in one request
 - `http://127.0.0.1:4000/api/platforms` — platform directory
 - `http://127.0.0.1:4000/api/platforms/instagram` — capability-driven platform view
 - `http://127.0.0.1:4000/api/platforms/instagram/why?capability=SHORT_VIDEO` — "why did this change?"
 - `http://127.0.0.1:4000/api/knowledge/search?q=maximum+video+length` — maintained-knowledge answers
+- `http://127.0.0.1:4000/api/sources` — source registry, including which sources actually produce facts
 - `http://127.0.0.1:4000/api/health` — system health
+
+Production-shaped local run (one origin, built assets):
+
+```bash
+npm run build && npm start   # everything on :4000
+```
 
 Run one research cycle against real documentation:
 
@@ -127,10 +142,10 @@ machine. A hosted vector model plugs in behind the same interface.
 
 ## Creator-facing language
 
-Creators see *Platform Support*, *Latest Updates*, *What's Changed* and *Coming Soon*.
+Creators see *What's changed*, *Create*, *Platform support*, *Your updates*, *Coming soon*.
 Capability registries, adapters, crawlers, embeddings and evolution events stay inside the
-Evolution Center. The creator-facing API surface is covered by a test that fails if
-internal jargon leaks into it.
+Evolution Center. The creator-facing API is a separate surface, and tests fail the build if
+internal jargon appears in it or in any rendered creator page.
 
 ## Configuration
 
@@ -142,6 +157,7 @@ See `.env.example`. Notable values:
 | `RESEARCH_INTERVAL_MS` | `900000` | cadence between cycles |
 | `ALLOWED_HOSTS` | *(empty = all)* | comma-separated hosts the engine may read |
 | `ADMIN_TOKEN` | *(empty)* | bearer token for `/api/admin/*`; required in production |
+| `CREATOR_ID` | *(empty)* | which creator the app acts as, until real accounts exist |
 | `DATA_DIR` | *(empty = memory)* | directory for the control-plane JSON snapshot |
 | `RESPECT_ROBOTS` | `true` | honour robots.txt |
 
@@ -150,15 +166,18 @@ See `.env.example`. Notable values:
 | Area | State |
 | --- | --- |
 | World Engine: fetch → verify → detect → understand → plan | implemented, tested |
-| Knowledge: versioning, TTL, retrieval, evidence | implemented, tested |
-| Evolution Center: events, proposals, approvals, health | implemented, tested |
+| Knowledge: versioning, TTL, retrieval, evidence, quality gate | implemented, tested |
+| Evolution Center: events, proposals, approvals, health, source yield | implemented, tested |
 | Creator impact + notifications | implemented, tested |
 | Config-driven UI model + platform readiness | implemented, tested |
 | Prompt versioning | implemented, tested |
-| Creator web app (React creation flow) | Phase 2 |
-| Postgres persistence, real publishing adapters, hosted embeddings | Phase 2 |
+| **Creator web app: creation flow, updates, platform support, coming soon** | **implemented, tested** |
+| Draft composer (deterministic, capability-aware) | implemented, tested |
+| Creator accounts, sessions, RBAC | Phase 3 |
+| Per-platform documentation curation + yield ranking | Phase 3 |
+| Postgres persistence, real publishing adapters, hosted embeddings | Phase 3 |
 
-See `docs/PHASE-1.md` for the full scope and `ARCHITECTURE.md` for the design.
+See `docs/PHASE-1.md` and `docs/PHASE-2.md` for scope, and `ARCHITECTURE.md` for the design.
 
 ## License
 

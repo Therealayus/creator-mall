@@ -29,7 +29,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/test/**/*.ts'],
+    files: ['**/test/**/*.ts', '**/test/**/*.tsx'],
     rules: {
       // Tests deliberately pass partial fixtures and assert on loose JSON.
       '@typescript-eslint/no-unsafe-assignment': 'off',
@@ -40,6 +40,15 @@ export default tseslint.config(
       '@typescript-eslint/no-unnecessary-type-assertion': 'off',
       '@typescript-eslint/no-floating-promises': 'off',
       '@typescript-eslint/require-await': 'off',
+    },
+  },
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', fetch: 'readonly' },
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
     },
   },
   {

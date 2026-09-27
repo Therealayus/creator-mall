@@ -159,6 +159,34 @@ export function renderEvolutionCenter(context: AppContext): string {
   </section>
 
   <section>
+    <h2>Source registry (${context.control.listSources().length})</h2>
+    <p class="sub">A source that keeps answering but never produces a verified fact is shown as quiet, so the registry can be curated instead of growing forever.</p>
+    <table>
+      <thead><tr><th>Source</th><th>Platform</th><th>Type</th><th>Status</th><th>Yield</th></tr></thead>
+      <tbody>
+      ${context.control
+        .listSources()
+        .slice(0, 40)
+        .map((source) => {
+          const signals =
+            context.control.listEvents().filter((event) => event.sourceIds.includes(source.id)).length +
+            [...context.control.knowledge.versions.values()].filter((version) => version.sourceIds.includes(source.id))
+              .length
+          const yieldWord = signals > 0 ? 'producing' : source.lastStatus === 'NEVER_CHECKED' ? 'not checked' : 'quiet'
+          return `<tr>
+            <td>${escapeHtml(source.name)}<br /><code>${escapeHtml(source.domain)}</code></td>
+            <td>${escapeHtml(source.platform ?? '—')}</td>
+            <td>${escapeHtml(source.sourceType)}</td>
+            <td>${escapeHtml(source.lastStatus)}${source.lastError ? ` <span class="pill">${escapeHtml(source.lastError.slice(0, 40))}</span>` : ''}</td>
+            <td>${yieldWord} (${signals})</td>
+          </tr>`
+        })
+        .join('\n      ')}
+      </tbody>
+    </table>
+  </section>
+
+  <section>
     <h2>Control plane</h2>
     <p class="sub">
       platforms: ${health.listPlatforms().length} · sources: ${health.listSources().length} ·

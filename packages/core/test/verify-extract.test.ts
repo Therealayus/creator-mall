@@ -7,6 +7,7 @@ import {
   assessSources,
   detectRumour,
   htmlToText,
+  isBoilerplate,
   parseDocument,
   verifyFacts,
 } from '../src/index.js'
@@ -104,6 +105,30 @@ describe('fact extraction', () => {
     })
     const capability = facts.find((fact) => fact.path.startsWith('capabilities.'))
     assert.equal(capability?.path, 'capabilities.SHORT_VIDEO')
+  })
+
+  it('never turns page furniture into a platform fact', () => {
+    const noise = [
+      'This browser is no longer supported. Please upgrade to a modern browser to continue.',
+      'We use cookies to personalise content and analyse traffic on this website.',
+      'Sign in to your account to manage your creator profile and preferences.',
+      'All rights reserved. Creator Mall is a trademark of Example Inc.',
+    ]
+    for (const text of noise) {
+      const facts = extractor.extract({
+        platformId: 'pf_1',
+        platformName: 'Example',
+        text,
+        sourceId: 'src_1',
+        capabilityRegistry: registry,
+      })
+      assert.deepEqual(facts, [], `should have extracted nothing from: ${text.slice(0, 40)}`)
+    }
+  })
+
+  it('classifies boilerplate on its own', () => {
+    assert.equal(isBoilerplate('This browser is no longer supported.'), true)
+    assert.equal(isBoilerplate('Reels can be up to 90 seconds long.'), false)
   })
 })
 

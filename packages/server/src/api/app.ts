@@ -2,6 +2,9 @@ import cors from 'cors'
 import express from 'express'
 import type { Express, NextFunction, Request, Response } from 'express'
 import helmet from 'helmet'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { ZodError, z } from 'zod'
 import { buildHealthReport } from '@creator-mall/core'
 import type { AppContext } from '../context.js'
@@ -15,6 +18,12 @@ import {
 } from './views.js'
 import { renderEvolutionCenter } from './evolution-center.js'
 import { runResearchCycle } from '../world-engine/pipeline.js'
+import {
+  creatorOverview,
+  draftForCreator,
+  validateForCreator,
+  whyForCreator,
+} from './creator.js'
 
 export function createApp(context: AppContext): Express {
   const app = express()
@@ -77,22 +86,33 @@ export function createApp(context: AppContext): Express {
   })
 
   app.get('/api/sources', (_request, response) => {
+    const events = context.control.listEvents()
+    const versions = [...context.control.knowledge.versions.values()]
     response.json({
-      sources: context.control.listSources().map((source) => ({
-        id: source.id,
-        name: source.name,
-        url: source.url,
-        domain: source.domain,
-        sourceType: source.sourceType,
-        platform: source.platform,
-        trustLevel: source.trustLevel,
-        active: source.active,
-        lastStatus: source.lastStatus,
-        lastCheckedAt: source.lastCheckedAt,
-        nextCheckAt: source.nextCheckAt,
-        consecutiveFailures: source.consecutiveFailures,
-        lastError: source.lastError ?? null,
-      })),
+      sources: context.control.listSources().map((source) => {
+        // How much this source has actually contributed, so an operator can see
+        // which registry entries are earning their place.
+        const signalCount =
+          events.filter((event) => event.sourceIds.includes(source.id)).length +
+          versions.filter((version) => version.sourceIds.includes(source.id)).length
+        return {
+          id: source.id,
+          name: source.name,
+          url: source.url,
+          domain: source.domain,
+          sourceType: source.sourceType,
+          platform: source.platform,
+          trustLevel: source.trustLevel,
+          active: source.active,
+          lastStatus: source.lastStatus,
+          lastCheckedAt: source.lastCheckedAt,
+          nextCheckAt: source.nextCheckAt,
+          consecutiveFailures: source.consecutiveFailures,
+          lastError: source.lastError ?? null,
+          signalCount,
+          yield: signalCount > 0 ? 'PRODUCING' : source.lastStatus === 'NEVER_CHECKED' ? 'UNKNOWN' : 'QUIET',
+        }
+      }),
     })
   })
 
@@ -165,6 +185,72 @@ export function createApp(context: AppContext): Express {
     return response.json(updates)
   })
 
+  // ── Creator-facing surface ──────────────────────────────────────────────────
+  // Plain language only: options, limits, reasons, sources.
+
+  app.get('/api/creator/overview', (_request, response) => {
+    response.json(creatorOverview(context, context.creatorSession()))
+  })
+
+  app.get('/api/creator/coming-soon', (_request, response) => {
+    response.json({ comingSoon: creatorOverview(context, undefined).comingSoon })
+  })
+
+  app.post('/api/creator/validate', (request, response, next) => {
+    void (async () => {
+      try {
+        const body = z
+          .object({
+            platform: z.string().min(1),
+            option: z.string().min(1),
+            text: z.string().max(20_000).default(''),
+            mediaCount: z.number().int().min(0).max(100).default(0),
+          })
+          .parse(request.body ?? {})
+        const result = await validateForCreator(context, {
+          platformSlug: body.platform,
+          optionKey: body.option,
+          text: body.text,
+          mediaCount: body.mediaCount,
+        })
+        response.json(result)
+      } catch (error) {
+        next(error)
+      }
+    })()
+  })
+
+  app.post('/api/creator/draft', (request, response, next) => {
+    try {
+      const body = z
+        .object({
+          platform: z.string().min(1),
+          option: z.string().min(1),
+          brief: z.string().max(400).default(''),
+          tone: z.string().max(40).optional(),
+        })
+        .parse(request.body ?? {})
+      response.json(
+        draftForCreator(context, {
+          platformSlug: body.platform,
+          optionKey: body.option,
+          brief: body.brief,
+          ...(body.tone ? { tone: body.tone } : {}),
+        }),
+      )
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  app.get('/api/creator/platforms/:platformSlug/why', (request, response) => {
+    const optionKey = queryString(request.query.option)
+    if (!optionKey) return response.status(400).json({ error: 'option query parameter is required' })
+    const why = whyForCreator(context, request.params.platformSlug ?? '', optionKey)
+    if (!why) return response.status(404).json({ error: 'unknown platform' })
+    return response.json(why)
+  })
+
   app.get('/api/creator/:creatorId/impact', (request, response) => {
     const creator = context.control.getCreator(request.params.creatorId ?? '')
     if (!creator) return response.status(404).json({ error: 'unknown creator' })
@@ -195,6 +281,9 @@ export function createApp(context: AppContext): Express {
     response.type('html').send(renderEvolutionCenter(context))
   })
 
+  // The creator web app, when it has been built. The API always wins on /api/*.
+  mountWebApp(app)
+
   app.use((_request, response) => response.status(404).json({ error: 'not found' }))
 
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
@@ -206,6 +295,22 @@ export function createApp(context: AppContext): Express {
   })
 
   return app
+}
+
+/**
+ * Serves the built creator app from `apps/web/dist` with an SPA fallback.
+ * Works from both `src` (tsx) and `dist` (node) because both sit one level
+ * below the package root.
+ */
+function mountWebApp(app: Express): void {
+  const dist = fileURLToPath(new URL('../../../../apps/web/dist/', import.meta.url))
+  const indexFile = resolve(dist, 'index.html')
+  if (!existsSync(indexFile)) return
+
+  app.use(express.static(dist, { index: false, maxAge: '1h' }))
+  app.get(/^\/(?!api\/|evolution-center).*/, (_request, response) => {
+    response.sendFile(indexFile)
+  })
 }
 
 /** Express query values are `string | string[] | undefined`; normalise them. */

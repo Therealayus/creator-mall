@@ -9,6 +9,12 @@ const schema = z.object({
   /** Bearer token for admin/evolution routes. Empty disables auth (dev only). */
   ADMIN_TOKEN: z.string().default(''),
 
+  /**
+   * Creator the web app acts as until real accounts exist (Phase 3).
+   * Empty = the single seeded demo creator.
+   */
+  CREATOR_ID: z.string().default(''),
+
   /** Directory for the JSON control-plane snapshot. Empty = memory only. */
   DATA_DIR: z.string().default(''),
 

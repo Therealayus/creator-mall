@@ -128,6 +128,33 @@ const DEPRECATION_PATTERN =
 const NEW_FORMAT_PATTERN =
   /\b(introduc(?:ing|es|ed)|launch(?:es|ed|ing)|rolling out|now available|new format|beta(?: testing)?|early access)\b/i
 
+/**
+ * Page furniture that carries no platform facts.
+ *
+ * Without this filter, cookie banners, "browser not supported" notices and login
+ * prompts get published as platform knowledge, because they are technically on an
+ * official page. Wrong information is worse than no information.
+ */
+const BOILERPLATE_PATTERNS: RegExp[] = [
+  /this browser is no longer supported/i,
+  /\b(cookie|consent|privacy|cookie policy|terms of (?:service|use))\b/i,
+  /\b(sign in|log ?in|log in|create (?:an )?account|get started|try it now)\b/i,
+  /skip to (?:main )?content/i,
+  /all rights reserved/i,
+  /©|\bcopyright\b/i,
+  /enable javascript/i,
+  /\b(loading|please wait)\.{0,3}$/i,
+  /^(home|menu|search|settings|help|support|about|privacy|terms|feedback|jobs|advertise)(\s|$)/i,
+  /\b(accept|manage) (?:all )?cookies\b/i,
+]
+
+export function isBoilerplate(text: string): boolean {
+  const value = text.trim()
+  if (value.length < 25) return true
+  return BOILERPLATE_PATTERNS.some((pattern) => pattern.test(value))
+}
+
+
 interface Sentence {
   text: string
   start: number
@@ -153,6 +180,7 @@ export class HeuristicFactExtractor implements FactExtractor {
         const value = rule.value(match)
         if (typeof value === 'number' && !Number.isFinite(value)) continue
         const sentence = sentenceAt(sentences, match.index)
+        if (isBoilerplate(sentence)) continue
         const key = `${input.platformId}:${rule.path}`
         if (consumed.has(key)) break
         consumed.add(key)
@@ -173,6 +201,7 @@ export class HeuristicFactExtractor implements FactExtractor {
 
     for (const sentence of sentences) {
       if (facts.length >= 60) break
+      if (isBoilerplate(sentence.text)) continue
       if (!DEPRECATION_PATTERN.test(sentence.text)) continue
       const matches = input.capabilityRegistry.matchSignals(sentence.text)
       facts.push({
@@ -190,6 +219,7 @@ export class HeuristicFactExtractor implements FactExtractor {
 
     for (const sentence of sentences) {
       if (facts.length >= 80) break
+      if (isBoilerplate(sentence.text)) continue
       if (!NEW_FORMAT_PATTERN.test(sentence.text)) continue
       const matches = input.capabilityRegistry.matchSignals(sentence.text)
       if (matches.length === 0) continue

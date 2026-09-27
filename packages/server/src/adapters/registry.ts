@@ -26,17 +26,26 @@ export class UnavailablePlatformAdapter implements PlatformAdapter {
   readonly platformSlug: string
   private readonly state: PlatformState | null
   private readonly reason: string
+  private readonly declared: ReadonlySet<string>
 
-  constructor(platformSlug: string, state: PlatformState | null, reason: string) {
+  constructor(platformSlug: string, state: PlatformState | null, reason: string, declaredCapabilityKeys: readonly string[] = []) {
     this.platformSlug = platformSlug
     this.state = state
     this.reason = reason
+    this.declared = new Set(declaredCapabilityKeys)
   }
 
   getCapabilities(): Promise<AdapterCapability[]> {
-    if (!this.state) return Promise.resolve([])
+    const observed = new Map(
+      Object.values(this.state?.capabilities ?? {}).map((observation) => [observation.capabilityKey, observation]),
+    )
+    for (const key of this.declared) {
+      if (!observed.has(key)) {
+        observed.set(key, { capabilityKey: key, state: 'ACTIVE', confidence: 0, sourceIds: [] })
+      }
+    }
     return Promise.resolve(
-      Object.values(this.state.capabilities).map((observation) => ({
+      [...observed.values()].map((observation) => ({
         key: observation.capabilityKey,
         state: observation.state,
         constraints: (observation.constraints ?? {}) as Record<string, never>,
@@ -46,9 +55,11 @@ export class UnavailablePlatformAdapter implements PlatformAdapter {
 
   validateContent(input: AdapterContentInput): Promise<AdapterValidationResult> {
     const issues: AdapterValidationResult['issues'] = []
-    const observation = this.state?.capabilities[input.contentType.toUpperCase()]
+    const key = input.contentType.toUpperCase()
+    const observation = this.state?.capabilities[key]
+    const supported = Boolean(observation) || this.declared.has(key)
 
-    if (!observation) {
+    if (!supported) {
       issues.push({
         path: 'contentType',
         message: `${this.platformSlug} support for "${input.contentType}" is not confirmed yet.`,
@@ -58,7 +69,7 @@ export class UnavailablePlatformAdapter implements PlatformAdapter {
       return Promise.resolve({ valid: false, issues })
     }
 
-    if (observation.state === 'DEPRECATED' || observation.state === 'REMOVED') {
+    if (observation?.state === 'DEPRECATED' || observation?.state === 'REMOVED') {
       issues.push({
         path: 'contentType',
         message: `${this.platformSlug} no longer supports "${input.contentType}".`,
@@ -75,7 +86,7 @@ export class UnavailablePlatformAdapter implements PlatformAdapter {
             path: limit.path,
             message: `This post is ${length} characters; ${this.platformSlug} allows ${limit.value}.`,
             severity: 'ERROR',
-            sourceId: observation.sourceIds[0] ?? null,
+            sourceId: observation?.sourceIds[0] ?? null,
           })
         }
       }
@@ -86,7 +97,7 @@ export class UnavailablePlatformAdapter implements PlatformAdapter {
             path: limit.path,
             message: `This post uses ${hashtags} hashtags; ${this.platformSlug} allows ${limit.value}.`,
             severity: 'ERROR',
-            sourceId: observation.sourceIds[0] ?? null,
+            sourceId: observation?.sourceIds[0] ?? null,
           })
         }
       }
@@ -95,7 +106,7 @@ export class UnavailablePlatformAdapter implements PlatformAdapter {
           path: limit.path,
           message: `This post has ${input.mediaRefs.length} media files; ${this.platformSlug} allows ${limit.value}.`,
           severity: 'ERROR',
-          sourceId: observation.sourceIds[0] ?? null,
+          sourceId: observation?.sourceIds[0] ?? null,
         })
       }
     }
@@ -155,8 +166,16 @@ export class AdapterRegistry {
    * Never returns null: unknown platforms resolve to the unavailable adapter so
    * callers cannot accidentally treat "no adapter" as "no platform".
    */
-  resolve(platformSlug: string, state: PlatformState | null, reason = 'No verified integration exists yet.'): PlatformAdapter {
-    return this.adapters.get(platformSlug) ?? new UnavailablePlatformAdapter(platformSlug, state, reason)
+  resolve(
+    platformSlug: string,
+    state: PlatformState | null,
+    reason = 'No verified integration exists yet.',
+    declaredCapabilityKeys: readonly string[] = [],
+  ): PlatformAdapter {
+    return (
+      this.adapters.get(platformSlug) ??
+      new UnavailablePlatformAdapter(platformSlug, state, reason, declaredCapabilityKeys)
+    )
   }
 
   list(): PlatformAdapter[] {

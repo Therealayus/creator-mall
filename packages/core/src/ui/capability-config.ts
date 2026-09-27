@@ -1,5 +1,5 @@
 import type { CapabilityDefinition } from '../types/platform.js'
-import type { SocialPlatform, PlatformState } from '../types/platform.js'
+import type { SocialPlatform, PlatformState, PlatformCapabilityObservation } from '../types/platform.js'
 import type { CapabilityState } from '../types/enums.js'
 import type { EvolutionEvent } from '../types/evolution.js'
 
@@ -124,7 +124,7 @@ export function buildPlatformUiConfig(input: BuildUiConfigInput): PlatformUiConf
     if (definition.domain !== 'CONTENT' && !observation[key]) continue
 
     const observed = observation[key]
-    const state: CapabilityState = observed?.state ?? 'UNKNOWN'
+    const state = resolveCapabilityState(input.platform, key, observed)
     const enabled = state === 'ACTIVE'
 
     options.push({
@@ -157,6 +157,21 @@ export function buildPlatformUiConfig(input: BuildUiConfigInput): PlatformUiConf
     generatedAt: input.generatedAt,
     attribution: [...attributionByKey.values()],
   }
+}
+
+/**
+ * A capability is available when a verified snapshot says so, or when the
+ * platform itself declares it and nothing has contradicted that declaration.
+ * A verified deprecation always wins: support is withdrawn only on evidence.
+ */
+function resolveCapabilityState(
+  platform: SocialPlatform,
+  capabilityKey: string,
+  observed: PlatformCapabilityObservation | undefined,
+): CapabilityState {
+  if (observed) return observed.state
+  if (platform.capabilityKeys.includes(capabilityKey)) return 'ACTIVE'
+  return 'UNKNOWN'
 }
 
 function disabledReason(state: CapabilityState, attribution: UiAttribution | undefined): string {

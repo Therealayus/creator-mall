@@ -224,18 +224,25 @@ function publishAcceptedKnowledge(
   const accepted = claims.filter((claim) => claim.status === 'ACCEPTED')
   if (accepted.length === 0) return 0
 
+  // Quality gate: a "what creators can do" page that contains no confirmed
+  // capability or limit is not worth publishing. Empty is better than vague.
+  const substantive = accepted.filter(
+    (claim) => claim.path.startsWith('capabilities.') || claim.path.startsWith('limits.') || claim.path.startsWith('mediaSpecs.'),
+  )
+  if (substantive.length === 0) return 0
+
   let published = 0
   upsertDocument(control.knowledge, {
     slug: `platform/${platform.slug}/capabilities`,
     title: `${platform.name}: what creators can do`,
     topic: 'platform-capabilities',
     platformId: platform.id,
-    body: accepted.map((claim) => evidenceBlock(claim)).join('\n\n'),
-    sourceIds: [...new Set(accepted.flatMap((claim) => claim.sourceIds))],
-    trustLevel: strongestTrust(accepted),
-    confidence: Math.max(...accepted.map((claim) => claim.confidence)),
+    body: substantive.map((claim) => evidenceBlock(claim)).join('\n\n'),
+    sourceIds: [...new Set(substantive.flatMap((claim) => claim.sourceIds))],
+    trustLevel: strongestTrust(substantive),
+    confidence: Math.max(...substantive.map((claim) => claim.confidence)),
     ttlPolicy: 'PLATFORM_GENERAL',
-    changeNote: `Refreshed from verified sources during scheduled research.`,
+    changeNote: 'Refreshed from verified sources during scheduled research.',
     clock,
   })
   published += 1

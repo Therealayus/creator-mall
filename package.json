@@ -6,19 +6,22 @@
   "description": "Adaptive intelligence platform for the creator economy: continuously observes the changing social-media ecosystem and evolves creator tools, knowledge, workflows and integrations through a controlled software lifecycle.",
   "workspaces": [
     "packages/core",
-    "packages/server"
+    "packages/server",
+    "apps/web"
   ],
   "engines": {
     "node": ">=20.11"
   },
   "scripts": {
-    "build": "npm run build --workspace @creator-mall/core && npm run build --workspace @creator-mall/server",
-    "typecheck": "npm run typecheck --workspace @creator-mall/core && npm run typecheck --workspace @creator-mall/server",
+    "build": "npm run build --workspace @creator-mall/core && npm run build --workspace @creator-mall/server && npm run build --workspace @creator-mall/web",
+    "typecheck": "npm run typecheck --workspace @creator-mall/core && npm run typecheck --workspace @creator-mall/server && npm run typecheck --workspace @creator-mall/web",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "npm run build --workspace @creator-mall/core && node --import tsx --test \"packages/*/test/**/*.test.ts\"",
+    "test": "npm run build --workspace @creator-mall/core && node scripts/test.mjs",
     "test:watch": "node --import tsx --test --watch \"packages/*/test/**/*.test.ts\"",
-    "dev": "npm run dev --workspace @creator-mall/server",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "npm run dev --workspace @creator-mall/server",
+    "dev:web": "npm run dev --workspace @creator-mall/web",
     "start": "node packages/server/dist/index.js",
     "seed": "npm run seed --workspace @creator-mall/server",
     "engine:once": "npm run engine:once --workspace @creator-mall/server",
@@ -33,6 +36,7 @@
     "typescript-eslint": "^8.16.0"
   },
   "allowScripts": {
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true
   }
 }

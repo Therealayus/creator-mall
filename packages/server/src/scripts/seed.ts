@@ -1,27 +1,13 @@
-import { stableId } from '@creator-mall/core'
-import type { CreatorProfile } from '@creator-mall/core'
 import { createContext } from '../context.js'
+import { nowIso } from '@creator-mall/core'
 
 /**
- * Seeds the control plane with the starting watchlist plus one demo creator, so
- * the Evolution Center and the creator-facing views have something to show.
+ * Seeds the control plane with the starting watchlist, source registry, prepared
+ * structures and the demo creator, then persists it when a data directory is set.
  */
 async function main(): Promise<void> {
   const context = await createContext()
   const { control } = context
-
-  const creator: CreatorProfile = {
-    id: stableId('cr', 'demo-video-creator'),
-    displayName: 'Demo video creator',
-    platformSlugs: ['youtube', 'instagram', 'tiktok'],
-    contentTypes: ['SHORT_VIDEO', 'LONG_VIDEO'],
-    usedCapabilityKeys: ['SHORT_VIDEO', 'LONG_VIDEO', 'VIDEO_MEDIA', 'SCHEDULING', 'ANALYTICS', 'THUMBNAIL'],
-    goals: ['grow reach', 'publish more often'],
-    locales: ['en'],
-    createdAt: new Date().toISOString(),
-  }
-  control.upsertCreator(creator)
-
   await context.persistence.save(control.toState())
 
   console.log(
@@ -29,8 +15,10 @@ async function main(): Promise<void> {
       {
         platforms: control.listPlatforms().length,
         sources: control.listSources().length,
-        capabilityKeys: control.capabilities.all().length,
-        creators: control.listCreators().map((entry) => ({ id: entry.id, name: entry.displayName })),
+        capabilities: control.capabilities.all().length,
+        templates: control.listTemplates().length,
+        creators: control.listCreators().map((creator) => ({ id: creator.id, name: creator.displayName })),
+        seededAt: nowIso(),
         dataDir: context.config.DATA_DIR || '(memory only)',
       },
       null,

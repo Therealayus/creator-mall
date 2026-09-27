@@ -48,6 +48,19 @@ Consequences:
 | Publishing (§41) | `PlatformAdapter.validateContent` checks the capability exists, then its limits |
 | Impact (§28) | `scoreCreatorImpact` scores creator × capability overlap |
 | Readiness (§17) | `buildReadinessProfile` scores areas from capabilities + adapter + sources |
+| Creator-facing limits (§20) | `limitHintsFor` maps an option to the verified limits to show |
+
+`buildPlatformUiConfig` (§19 + §20) is the only place the option set is decided:
+
+- a capability is available when a **verified snapshot says `ACTIVE`**, or when the platform
+  **declares** it and nothing has contradicted that declaration;
+- a **verified deprecation always wins** — support is withdrawn only on evidence;
+- anything else is shown **disabled with a reason** rather than hidden, so the gap stays
+  visible instead of silent.
+
+`limitHintsFor` maps an option to the verified limits a creator needs before writing
+("Maximum length: 90 seconds"), and returns "we have not confirmed the exact limits for this
+option yet" instead of guessing.
 
 ## 3. Snapshots, diffs and risk
 
@@ -181,7 +194,9 @@ lives in generic structures:
 - `KnowledgeDocument/Version/Chunk/Fact` — versioned, attributed, expiring knowledge
 - `PublishedContent` + `PlatformContentReference` (Phase 2) — future-proof publishing
 
-## 11. Phase 1 API surface
+## 11. API surface
+
+### Internal (operator) — technical vocabulary allowed
 
 | Route | Purpose |
 | --- | --- |
@@ -190,25 +205,71 @@ lives in generic structures:
 | `GET /api/platforms/:id` | capabilities, readiness, UI config, timeline, knowledge |
 | `GET /api/platforms/:id/timeline` | creator-visible evolution timeline |
 | `GET /api/platforms/:id/why?capability=` | "why did this change?" with sources |
-| `GET /api/sources` | source registry with health |
+| `GET /api/sources` | source registry with health and yield |
 | `GET /api/evolution/summary` | Evolution Center counters |
 | `GET /api/evolution/events` | change log |
 | `GET /api/evolution/proposals` | staged changes |
 | `POST /api/evolution/proposals/:id/decision` | approve / reject |
 | `GET /api/knowledge/search?q=` | answers from maintained knowledge |
 | `GET /api/knowledge/documents` | versions, TTLs, source attribution |
-| `GET /api/creator/:id/updates` | creator-facing alerts, no jargon |
 | `POST /api/admin/research/run` | trigger one cycle (token-guarded) |
 | `GET /evolution-center` | operator dashboard (server-rendered) |
 
-## 12. Deliberate non-goals in Phase 1
+### Creator-facing — plain language only
+
+`server/src/api/creator.ts` is a separate, deliberately narrow surface. It converts internal
+state into what a creator needs and nothing else: options, limits, reasons, sources, drafts.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/creator/overview` | home screen in one request |
+| `GET /api/creator/coming-soon` | watchlist with readiness |
+| `POST /api/creator/validate` | checks a draft against verified limits |
+| `POST /api/creator/draft` | structured starting point from platform templates |
+| `GET /api/creator/platforms/:slug/why?option=` | "why did this change?" |
+| `GET /api/creator/:id/updates` | personalised alerts |
+
+Tests fail the build if any of these responses contain internal vocabulary, and the web app's
+server-rendered pages are checked for the same thing.
+
+## 12. The creator app
+
+`apps/web` is React + Vite with three runtime dependencies and one stylesheet. All product
+logic lives in `apps/web/src/lib/view-models.ts` as pure functions, so the rules are tested
+without a browser; components only render.
+
+```
+Shell (nav)
+├── HomePage          What's changed, grouped by platform
+├── CreatePage        capability-driven creation flow
+│   ├── CapabilityPicker   options from uiConfig, disabled ones explain themselves
+│   ├── ComposerForm       brief, text, media count, live character counter
+│   ├── validation         server-side, against verified limits
+│   └── WhyCard            §35 attribution
+├── PlatformPage      confirmed vs unavailable, freshness, connection state
+├── UpdatesPage       only what affects this creator
+└── ComingSoonPage    watchlist with readiness
+```
+
+The creation flow contains **no platform name**. It renders whatever
+`buildPlatformUiConfig` returns, which is why a newly verified capability appears in the UI
+without a frontend change.
+
+In development Vite proxies `/api` to the API on `:4000`; in production the API serves
+`apps/web/dist` with an SPA fallback, so there is one origin and no CORS in the product path.
+
+## 13. Deliberate non-goals
 
 - **No AI writes code.** Not by policy, by architecture: there is no code-generation path
   in the repo.
 - **No fine-tuning.** Adaptation happens through knowledge retrieval, configuration
   evolution, prompt versioning, the capability registry and evaluation — not by retraining
   a model on user data.
-- **No creator web app yet.** The UI *model* (`PlatformUiConfig`) is complete and tested;
-  the React creation flow that consumes it is Phase 2.
-- **No real publishing adapters.** The registry, the contract and the honest unavailable
-  implementation exist; live platform integrations are Phase 2 work gated on verified APIs.
+- **No fake generation.** The draft composer is deterministic and says so in its
+  `provenance` field. It is never presented as AI output.
+- **No dead ends.** An unsupported option is shown disabled with a reason rather than
+  hidden, and publishing is never offered for a platform without a verified integration.
+- **No invented knowledge.** A live run against platform homepages produced no facts, and the
+  system published nothing rather than turning navigation text into knowledge.
+- **No real publishing adapters yet.** The registry, the contract and the honest unavailable
+  implementation exist; live integrations are gated on verified APIs.

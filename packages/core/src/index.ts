@@ -35,6 +35,7 @@ export * from './evolution/planner.js'
 export * from './evolution/readiness.js'
 
 export * from './ui/capability-config.js'
+export * from './ui/limits.js'
 
 export * from './knowledge/chunking.js'
 export * from './knowledge/store.js'
@@ -43,5 +44,7 @@ export * from './prompts/diff.js'
 export * from './prompts/versioning.js'
 
 export * from './platform/bootstrap.js'
+
+export * from './composer/draft.js'
 
 export * from './health/report.js'
