@@ -15,7 +15,10 @@ export function applyClaims(previous: PlatformState | null, claims: ReadonlyArra
   const state: PlatformState = previous ? cloneState(previous) : emptyPlatformState()
 
   for (const claim of claims) {
-    if (claim.status !== 'ACCEPTED' && claim.status !== 'WATCH') continue
+    // WATCH is "something might be going on". It belongs in the event log for a
+  // human to look at, not in platform state: applying it let two news sources
+  // switch a creator-facing option on without a single official confirmation.
+  if (claim.status !== 'ACCEPTED') continue
     applyClaim(state, claim)
   }
 
@@ -32,7 +35,11 @@ function applyClaim(state: PlatformState, claim: VerifiedClaim): void {
     const value = typeof incoming === 'object' && incoming !== null && !Array.isArray(incoming) ? incoming : {}
     state.capabilities[key] = {
       capabilityKey: key,
-      state: typeof value.state === 'string' ? (value.state as PlatformState['capabilities'][string]['state']) : 'ACTIVE',
+      // A claim that names a capability without stating its state proves
+      // nothing about whether the platform supports it. Defaulting to ACTIVE
+      // let any sentence matching "now available" enable a creator option;
+      // PROPOSED shows up as "not available yet" instead, which is the truth.
+      state: typeof value.state === 'string' ? (value.state as PlatformState['capabilities'][string]['state']) : 'PROPOSED',
       confidence: Math.max(existing?.confidence ?? 0, claim.confidence),
       sourceIds: [...new Set([...(existing?.sourceIds ?? []), ...claim.sourceIds])],
       notes: claim.statement,

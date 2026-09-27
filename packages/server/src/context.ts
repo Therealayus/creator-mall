@@ -51,12 +51,23 @@ export interface AppContext {
  */
 export async function createContext(
   overrides: Partial<Config> = {},
-  deps: { fetchImpl?: typeof fetch; seed?: boolean } = {},
+  deps: { fetchImpl?: typeof fetch; seed?: boolean; persistence?: PersistencePort } = {},
 ): Promise<AppContext> {
   const config = { ...loadConfig(), ...overrides }
-  const persistence = await createPersistence(config)
+  const persistence = deps.persistence ?? (await createPersistence(config))
 
-  const stored: ControlPlaneState | null = await persistence.load().catch(() => null)
+  // A failed load must never be treated as "there is no stored state".
+  //
+  // If this returns null on a transport error, the control plane boots empty,
+  // re-seeds, and the first save() DELETEs every real row. Failing to start is
+  // recoverable; silently destroying a database is not.
+  const stored: ControlPlaneState | null = await persistence.load().catch((error: unknown) => {
+    console.error(
+      '[creator-mall] could not load persisted state; refusing to start rather than risk overwriting it',
+      error,
+    )
+    throw error
+  })
   const control = new ControlPlane(stored ?? undefined)
 
   if (deps.seed !== false) seedControlPlane(control)

@@ -83,7 +83,7 @@ export function requireAuth(context: AppContext) {
   }
 }
 
-function isCsrfFailure(request: Request): boolean {
+export function isCsrfFailure(request: Request): boolean {
   if (SAFE_METHODS.has(request.method)) return false
   if (!request.session) return false
   return !csrfMatches(request.session, request.header('x-csrf-token'))
@@ -405,7 +405,7 @@ export function authRoutes(context: AppContext): Router {
  */
 const limiters = new WeakMap<object, RateLimiter>()
 
-function limiterFor(context: AppContext): RateLimiter {
+export function limiterFor(context: AppContext): RateLimiter {
   let limiter = limiters.get(context)
   if (!limiter) {
     limiter = new RateLimiter()

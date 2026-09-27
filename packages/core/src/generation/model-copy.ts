@@ -8,6 +8,8 @@ export interface ModelCopyOptions {
   fallback?: CopyGenerator
   maxTokens?: number
   onFallback?: (reason: string) => void
+  /** An activated platform prompt version, appended to the base system prompt. */
+  systemPrompt?: string
 }
 
 const SYSTEM_PROMPT = `You write social posts for a creator who already knows their audience.
@@ -35,6 +37,7 @@ export class ModelCopyGenerator implements CopyGenerator {
   private readonly fallback: CopyGenerator
   private readonly maxTokens: number
   private readonly onFallback?: (reason: string) => void
+  private readonly systemPrompt: string
 
   constructor(options: ModelCopyOptions) {
     this.client = options.client
@@ -42,13 +45,19 @@ export class ModelCopyGenerator implements CopyGenerator {
     this.maxTokens = options.maxTokens ?? 900
     this.onFallback = options.onFallback
     this.producedBy = `model:${options.client.name}`
+    this.systemPrompt = options.systemPrompt
+      ? `${SYSTEM_PROMPT}\n\n${options.systemPrompt}`
+      : SYSTEM_PROMPT
   }
 
   async generateCopy(request: GenerationRequest): Promise<GeneratedCopy> {
     let completion: string
     try {
       completion = await this.client.complete({
-        system: SYSTEM_PROMPT,
+        // The platform-specific prompt version wins when one has been activated,
+        // so an approved prompt change actually reaches the output. Without
+        // this the whole Evolution Center had no effect on what a creator got.
+        system: this.systemPrompt,
         user: this.promptFor(request),
         maxTokens: this.maxTokens,
       })

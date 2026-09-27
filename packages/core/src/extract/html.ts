@@ -45,6 +45,9 @@ const BLOCK_TAGS = new Set([
 export function htmlToText(html: string): string {
   let out = ''
   let skipDepth = 0
+  // Comments carry no platform facts and are the cheapest way to hide text from
+  // a human reader while it still reaches the model, so they go first.
+  html = html.replace(/<!--[\s\S]*?-->/g, ' ')
   const tagPattern = /<\/?([a-zA-Z0-9-]+)([^>]*)>/g
   let lastIndex = 0
   let match: RegExpExecArray | null

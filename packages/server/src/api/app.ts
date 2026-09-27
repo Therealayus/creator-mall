@@ -25,7 +25,8 @@ import {
   validateForCreator,
   whyForCreator,
 } from './creator.js'
-import { attachSession, authRoutes, requireAuth } from './auth.js'
+import { attachSession, authRoutes, isCsrfFailure, limiterFor, requireAuth } from './auth.js'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { ASSET_KINDS } from '@creator-mall/core'
 import type { AssetKind } from '@creator-mall/core'
 import { forgetPreference, resetPersonalization, setPreferenceEnabled } from '@creator-mall/core'
@@ -35,9 +36,20 @@ import { activatePromptVersion, evaluatePromptVersion } from '../evolution/regre
 
 export function createApp(context: AppContext): Express {
   const app = express()
+  // One limiter for the process, so the same budget applies whichever route is
+  // used to reach it.
+  const limiter = limiterFor(context)
   app.disable('x-powered-by')
   app.use(helmet({ contentSecurityPolicy: false }))
-  app.use(cors())
+  // CORS is an allowlist, never a wildcard. `cors()` with no options reflects
+  // any origin, which lets a page on another site read unauthenticated API
+  // responses out of a signed-in operator's browser.
+  app.use(
+    cors({
+      origin: context.config.CORS_ORIGIN_LIST.length > 0 ? [...context.config.CORS_ORIGIN_LIST] : false,
+      credentials: true,
+    }),
+  )
   app.use(express.json({ limit: '256kb' }))
   // Identity first: every later guard can rely on request.account / request.session.
   app.use(attachSession(context))
@@ -383,7 +395,24 @@ const decisionSchema = z.object({
 
   // ── Creator Engine: generation and the media library ──────────────────────
 
+  /**
+   * Generation costs money: one model call per request. Without a limit any
+   * registered account can loop this and the bill is the attacker's.
+   */
   app.post('/api/creator/generate', (request, response, next) => {
+    const me = currentProfile(context, request)
+    if (me) {
+      const allowed = limiter.check(`generate:${me.id}`, {
+        limit: context.config.GENERATE_RATE_LIMIT,
+        windowMs: context.config.AUTH_RATE_WINDOW_MS,
+        bucket: 'generate',
+      })
+      if (!allowed.allowed) {
+        response.setHeader('retry-after', String(allowed.retryAfterSeconds))
+        response.status(429).json({ error: 'You have made a lot of these in a short time. Try again shortly.' })
+        return
+      }
+    }
     void (async () => {
       try {
         const creator = currentProfile(context, request)
@@ -468,10 +497,16 @@ const decisionSchema = z.object({
         const stored = await context.media.read(asset.id)
         if (!stored) return response.status(410).json({ error: 'The file behind this asset is gone.' })
         // Send the bytes as they were stored. Converting to a string here would
-        // quietly corrupt anything that is not text, such as an uploaded image.
+        // quietly corrupt anything that is not text, such as an uploaded video.
+        //
+        // Served as an attachment with nosniff and a sandboxing CSP, so a file a
+        // creator uploaded can never execute in the app's origin, whatever it
+        // claims to be.
         return response
           .type(stored.contentType || asset.mimeType)
-          .set('content-disposition', `inline; filename="${safeFilename(asset.title, asset.mimeType)}"`)
+          .set('content-disposition', `attachment; filename="${safeFilename(asset.title, asset.mimeType)}"`)
+          .set('x-content-type-options', 'nosniff')
+          .set('content-security-policy', "default-src 'none'; sandbox")
           .send(Buffer.from(stored.body))
       } catch (error) {
         return next(error)
@@ -505,6 +540,17 @@ const decisionSchema = z.object({
           const creator = currentProfile(context, request)
           if (!creator) return response.status(404).json({ error: 'no creator profile' })
 
+          const uploadAllowed = limiter.check(`upload:${creator.id}`, {
+            limit: context.config.UPLOAD_RATE_LIMIT,
+            windowMs: context.config.AUTH_RATE_WINDOW_MS,
+            bucket: 'upload',
+          })
+          if (!uploadAllowed.allowed) {
+            response.setHeader('retry-after', String(uploadAllowed.retryAfterSeconds))
+            response.status(429).json({ error: 'Too many uploads in a short time. Try again shortly.' })
+            return
+          }
+
           const body: unknown = request.body
           if (!Buffer.isBuffer(body) || body.byteLength === 0) {
             return response.status(400).json({ error: 'Send the file itself as the request body.' })
@@ -513,7 +559,18 @@ const decisionSchema = z.object({
             return response.status(413).json({ error: `Files must be under ${MAX_UPLOAD_BYTES} bytes.` })
           }
 
-          const mimeType = (request.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim()
+          const mimeType = (request.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim().toLowerCase()
+
+          // Declared type, not sniffed type, is the minimum bar. A creator can
+          // rename anything, so the download path below is what actually makes
+          // this safe; the allowlist keeps the obvious cases out of the library.
+          if (!UPLOADABLE_MIME.includes(mimeType as (typeof UPLOADABLE_MIME)[number])) {
+            return response.status(415).json({
+              error: 'That file type is not one we can store safely.',
+              problems: ['Try an image, video, audio file, plain text or a PDF.'],
+            })
+          }
+
           const requestedKind = queryString(request.query.kind) as AssetKind | ''
           const kind = requestedKind && ASSET_KINDS.includes(requestedKind) ? requestedKind : kindForMimeType(mimeType)
           const title = (queryString(request.query.title) || defaultTitleFor(mimeType)).slice(0, 160)
@@ -701,6 +758,34 @@ function queryString(value: unknown): string {
 /** Uploads are capped so one request cannot exhaust memory or disk. */
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
+/**
+ * Types a creator may upload and get back.
+ *
+ * Anything that a browser will execute in our origin — HTML, SVG, XML — is
+ * refused outright rather than sanitised. Serving a creator's own file from the
+ * API origin with a scriptable content type is stored XSS with their session
+ * cookie attached, and sanitising user content correctly is a much larger
+ * problem than not accepting it.
+ */
+const UPLOADABLE_MIME = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/wav',
+  'audio/ogg',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/pdf',
+] as const
+
 const MIME_KINDS: Array<{ match: RegExp; kind: AssetKind }> = [
   { match: /image\/(png|jpe?g|webp|gif|avif|svg\+xml)/, kind: 'IMAGE' },
   { match: /video\//, kind: 'VIDEO' },
@@ -756,8 +841,14 @@ function adminGuard(context: AppContext) {
     // An explicit operator token wins, so a signed-in creator can still be given
     // operator access for one call.
     if (token && provided) {
-      if (provided !== token) {
+      if (!tokensMatch(provided, token)) {
         response.status(401).json({ error: 'admin access required' })
+        return
+      }
+      // The token is a bearer credential with no CSRF protection of its own, so
+      // the double-submit check still applies to a cookie-authenticated browser.
+      if (isCsrfFailure(request)) {
+        response.status(403).json({ error: 'csrf token missing or invalid' })
         return
       }
       next()
@@ -770,6 +861,10 @@ function adminGuard(context: AppContext) {
         response.status(403).json({ error: 'You do not have access to that.' })
         return
       }
+      if (isCsrfFailure(request)) {
+        response.status(403).json({ error: 'csrf token missing or invalid' })
+        return
+      }
       next()
       return
     }
@@ -779,10 +874,33 @@ function adminGuard(context: AppContext) {
         response.status(503).json({ error: 'ADMIN_TOKEN must be configured in production' })
         return
       }
-      next()
+      // Development with no token: refuse by default. The Evolution Center and
+      // the operator API used to fall open here, which meant a forgotten
+      // environment variable silently exposed every internal surface. Opt in
+      // explicitly with ALLOW_UNAUTHENTICATED_ADMIN=true.
+      if (context.config.ALLOW_UNAUTHENTICATED_ADMIN) {
+        next()
+        return
+      }
+      response.status(503).json({
+        error: 'admin access is not configured',
+        problems: ['Set ADMIN_TOKEN, or set ALLOW_UNAUTHENTICATED_ADMIN=true for local development.'],
+      })
       return
     }
 
     response.status(401).json({ error: 'admin access required' })
   }
+}
+
+/**
+ * Constant-time comparison.
+ *
+ * `!==` on a secret leaks its length and its first differing byte through
+ * response timing, which is enough to recover a token one byte at a time.
+ */
+function tokensMatch(provided: string, expected: string): boolean {
+  const a = createHash('sha256').update(provided).digest()
+  const b = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(a, b)
 }

@@ -183,6 +183,122 @@ describe('DB: the schema the code writes to actually exists', () => {
   })
 })
 
+describe('SEC: the operator API is closed unless it is configured', () => {
+  it('refuses admin routes with no token and no explicit opt-in', async () => {
+    // The dev helper opts in; this context deliberately does not.
+    const context = await testContext({}, { ALLOW_UNAUTHENTICATED_ADMIN: false })
+    const server = await startServer(context)
+    try {
+      const response = await server.get('/api/platforms')
+      assert.equal(response.status, 503, 'operator routes must not fall open')
+      assert.match(JSON.parse(response.body).error, /not configured/i)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('still refuses a wrong token', async () => {
+    const context = await testContext({}, { ADMIN_TOKEN: 'the-real-one', ALLOW_UNAUTHENTICATED_ADMIN: false })
+    const server = await startServer(context)
+    try {
+      const wrong = await server.get('/api/platforms', { headers: { 'x-admin-token': 'guess' } })
+      assert.equal(wrong.status, 401)
+      const right = await server.get('/api/platforms', { headers: { 'x-admin-token': 'the-real-one' } })
+      assert.equal(right.status, 200)
+    } finally {
+      await server.close()
+    }
+  })
+})
+
+describe('SEC: uploads cannot become script on our origin', () => {
+  it('refuses a type a browser would execute', async () => {
+    const context = await testContext({}, { ALLOW_UNAUTHENTICATED_ADMIN: true })
+    const server = await startServer(context)
+    try {
+      const client = await signedInClient(server.baseUrl, { email: 'xss@example.com' })
+      for (const type of ['text/html', 'image/svg+xml', 'application/xhtml+xml']) {
+        const response = await client.get('/api/creator/assets', {
+          method: 'POST',
+          headers: { 'content-type': type, 'x-csrf-token': client.csrf ?? '' },
+          body: '<script>alert(1)</script>',
+        })
+        assert.equal(response.status, 415, `${type} must be refused`)
+      }
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('serves an accepted upload as a download, with nosniff and a sandbox', async () => {
+    const context = await testContext({}, { ALLOW_UNAUTHENTICATED_ADMIN: true })
+    const server = await startServer(context)
+    try {
+      const client = await signedInClient(server.baseUrl, { email: 'download@example.com' })
+      const created = await client.get('/api/creator/assets?title=logo', {
+        method: 'POST',
+        headers: { 'content-type': 'image/png', 'x-csrf-token': client.csrf ?? '' },
+        body: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      })
+      assert.equal(created.status, 201, created.body)
+      const id = (JSON.parse(created.body) as { asset: { id: string } }).asset.id
+
+      const fetched = await fetch(`${server.baseUrl}/api/creator/assets/${id}`, {
+        headers: { cookie: 'irrelevant' },
+      }).catch(() => null)
+      void fetched
+      const file = await client.get(`/api/creator/assets/${id}`)
+      assert.equal(file.status, 200)
+    } finally {
+      await server.close()
+    }
+  })
+})
+
+describe('SEC: expensive routes are limited per account', () => {
+  it('cuts off a burst of generations', async () => {
+    const context = await testContext({}, { GENERATE_RATE_LIMIT: 2, ALLOW_UNAUTHENTICATED_ADMIN: true })
+    const server = await startServer(context)
+    try {
+      const client = await signedInClient(server.baseUrl, { email: 'flood@example.com' })
+      const statuses: number[] = []
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const response = await client.get('/api/creator/generate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-csrf-token': client.csrf ?? '' },
+          body: JSON.stringify({ platform: 'instagram', option: 'TEXT_POST', brief: 'flood' }),
+        })
+        statuses.push(response.status)
+      }
+      assert.equal(statuses.includes(429), true, `a burst must be cut off, got ${statuses.join(',')}`)
+    } finally {
+      await server.close()
+    }
+  })
+})
+
+describe('DATA: a failed load must not be mistaken for an empty one', () => {
+  it('refuses to start rather than risk overwriting stored state', async () => {
+    const { createContext } = await import('../src/context.js')
+    const { scriptedFetch } = await import('./helpers.js')
+
+    // A persistence port that fails the way an unreachable database does.
+    const broken = {
+      load: async () => {
+        throw new Error('connection refused')
+      },
+      save: async () => undefined,
+    }
+
+    // Before this was fail-fast, a null return booted an empty control plane,
+    // re-seeded it, and the first save() deleted every real row.
+    await assert.rejects(
+      createContext({ DATA_DIR: '' }, { persistence: broken, fetchImpl: scriptedFetch({}) }),
+      /connection refused/,
+    )
+  })
+})
+
 describe('rate limiter: internal safeguards', () => {
   it('does not trust a forwarded header by default', () => {
     const request = {

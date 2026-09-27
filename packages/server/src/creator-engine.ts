@@ -21,6 +21,7 @@ import type {
 import type { AppContext } from './context.js'
 import { limitValue } from '@creator-mall/core'
 import type { MediaLibrary } from './store/media-library.js'
+import { redactSecrets } from './ai/openrouter.js'
 
 /**
  * The Creator Engine.
@@ -34,13 +35,17 @@ import type { MediaLibrary } from './store/media-library.js'
 export const renderer = new DeterministicGenerator()
 
 /** Model-backed when a provider exists, renderer-backed otherwise. */
-export function copyGenerator(context: AppContext): CopyGenerator {
+export function copyGenerator(context: AppContext, promptKey?: string): CopyGenerator {
   const model = context.modelClient
   if (!model) return renderer
+  // Feed the activated prompt version in, so an approved prompt change is what
+  // actually gets written rather than sitting inert in the library.
+  const active = promptKey ? context.control.prompts.active(promptKey) : undefined
   return new ModelCopyGenerator({
     client: model,
     fallback: renderer,
-    onFallback: (reason) => console.log(`[creator-engine] copy fell back to the renderer: ${reason}`),
+    ...(active ? { systemPrompt: active.body } : {}),
+    onFallback: (reason) => console.log(`[creator-engine] copy fell back to the renderer: ${redactSecrets(reason)}`),
   })
 }
 
@@ -97,7 +102,7 @@ export async function generate(
   const brief = generation.request.brief.trim()
 
   if (generation.request.option === 'SHORT_VIDEO' || generation.request.option === 'LONG_VIDEO') {
-    const copy: GeneratedCopy = await copyGenerator(context).generateCopy(request)
+    const copy: GeneratedCopy = await copyGenerator(context, promptKeyFor(generation.platform, generation.request.option)).generateCopy(request)
     const board: GeneratedStoryboard = await (renderer as VideoGenerator).generateStoryboard({
       ...request,
       ...(generation.request.targetSeconds ? { targetSeconds: generation.request.targetSeconds } : {}),
@@ -132,7 +137,7 @@ export async function generate(
     }
   }
 
-  const copy: GeneratedCopy = await copyGenerator(context).generateCopy(request)
+  const copy: GeneratedCopy = await copyGenerator(context, promptKeyFor(generation.platform, generation.request.option)).generateCopy(request)
   const poster: GeneratedImage = await (renderer as ImageGenerator).generateImage({
     ...request,
     title: titleFor(brief, capabilityLabel),
@@ -155,6 +160,11 @@ export async function generate(
       ...(limitNumber(request, /character/i) ? { characterLimit: limitNumber(request, /character/i) } : {}),
     },
   }
+}
+
+/** Matches the key the pipeline drafts prompts under: slug:capability:generation. */
+function promptKeyFor(platform: SocialPlatform, option: string): string {
+  return `${platform.slug}:${option}:generation`
 }
 
 function titleFor(brief: string, fallback: string): string {

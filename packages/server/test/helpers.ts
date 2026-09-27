@@ -96,7 +96,9 @@ export async function testContext(
     // with a key in `.env` would send every generation to a real model, and the
     // tests would depend on the network. Model behaviour is covered separately
     // in the provider suite with an injected fetch.
-    { RESEARCH_ENABLED: false, FETCH_MIN_HOST_GAP_MS: 0, OPENROUTER_API_KEY: '', ...overrides },
+    // The operator API is closed by default now (see adminGuard), and the gate
+    // has its own test. These suites are about the features, not the door.
+    { RESEARCH_ENABLED: false, FETCH_MIN_HOST_GAP_MS: 0, OPENROUTER_API_KEY: '', ALLOW_UNAUTHENTICATED_ADMIN: true, ...overrides },
     { fetchImpl: scriptedFetch(routes, fallback) },
   )
 }

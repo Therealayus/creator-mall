@@ -11,6 +11,11 @@ const schema = z.object({
 
   /** Bearer token for admin/evolution routes. Empty disables auth (dev only). */
   ADMIN_TOKEN: z.string().default(''),
+  /**
+   * Lets the operator API through with no token at all. Development only; the
+   * admin surfaces are closed by default rather than falling open.
+   */
+  ALLOW_UNAUTHENTICATED_ADMIN: z.coerce.boolean().default(false),
 
   // ─── Accounts and sessions ────────────────────────────────────────────────
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(24 * 14),
@@ -41,6 +46,9 @@ const schema = z.object({
   /** Sign-in attempts allowed per IP per window. */
   AUTH_RATE_LIMIT: z.coerce.number().int().min(1).max(10_000).default(60),
   AUTH_RATE_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(15 * 60_000),
+  /** Generation costs a model call each time, so it gets its own budget. */
+  GENERATE_RATE_LIMIT: z.coerce.number().int().min(1).max(10_000).default(60),
+  UPLOAD_RATE_LIMIT: z.coerce.number().int().min(1).max(10_000).default(120),
   /**
    * Only turn this on behind a proxy you control. A forwarded header that
    * anyone can set is not a rate limit.
@@ -58,6 +66,13 @@ const schema = z.object({
    * Required in production: without it a forged Host header can rewrite a
    * password-reset link and steal the token.
    */
+  /**
+   * Origins allowed to call the API from a browser. Empty means no cross-origin
+   * browser access at all, which is the correct default for a same-origin app.
+   */
+  CORS_ORIGINS: z.string().default(''),
+  /** Parsed into an array by `loadConfig`; the schema only holds the raw string. */
+  CORS_ORIGIN_LIST: z.array(z.string()).default([]),
   PUBLIC_BASE_URL: z.string().default(''),
 
   /** World Engine cadence. */
@@ -131,7 +146,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       .map((host) => host.trim().toLowerCase())
       .filter(Boolean),
   )
-  return { ...parsed, allowedHosts }
+  const corsOrigins = parsed.CORS_ORIGINS
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+  return { ...parsed, allowedHosts, CORS_ORIGIN_LIST: corsOrigins }
 }
 
 export function isProduction(config: Config): boolean {
