@@ -325,3 +325,48 @@ In development Vite proxies `/api` to the API on `:4000`; in production the API 
   system published nothing rather than turning navigation text into knowledge.
 - **No real publishing adapters yet.** The registry, the contract and the honest unavailable
   implementation exist; live integrations are gated on verified APIs.
+
+## 16. Source curation
+
+A registry that only grows is a liability, so every source is scored from what it
+has actually produced (SourceStats on the record, not a parallel tally that
+could drift):
+
+| Tier | Meaning | Action |
+| --- | --- | --- |
+| PRIMARY | contributes facts, and did so lately | keep |
+| SECONDARY | useful, not yet judged, or not lately | keep, check less often |
+| QUIET | answers but has never yielded a fact | repoint at a deeper doc path |
+| BROKEN | disallowed by robots, or failing repeatedly | retire or repoint |
+
+Productive sources are scheduled first, so a tight request budget still buys
+information. Candidate documentation paths start **inactive**: the engine probes
+a few per cycle and activates only the ones that produce a verified fact. A wrong
+guess costs one request, never a wrong belief.
+
+## 17. Adapters as definitions
+
+A publishing integration is data — endpoint, method, field mapping, where the
+published id comes back, how the credential is presented. One implementation
+(HttpPlatformAdapter) therefore serves every platform, present or future, and
+adding a platform integration requires no new class and no branch anywhere in
+the product.
+
+- credentials are resolved per call from the environment, never stored;
+- a platform error body is never surfaced, because it can echo the credential;
+- SimulatedPlatformAdapter runs the same path with no network call and flags
+  every result as simulated;
+- publishingEnabled needs two independent facts: a LIVE adapter **and** our
+  own verified knowledge that the platform's publishing API exists.
+
+## 18. Two independent providers, one port
+
+| Concern | Default | Opt-in |
+| --- | --- | --- |
+| Fact extraction | deterministic patterns | a model, treated as an untrusted contributor |
+| Embeddings | local hashed bag of words | a hosted embeddings endpoint |
+
+Both degrade the same way: a provider failure falls back silently, records a
+key-free reason, and never blocks the cycle. The local defaults are not
+placeholders — knowledge is searchable and limits are extractable with no key,
+no network, and nothing about a creator leaving the machine.

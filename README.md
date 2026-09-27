@@ -1,7 +1,5 @@
-<<<<<<< HEAD
-# creator-mall
-=======
 # Creator Mall
+
 
 **The mall that never closes.**
 
@@ -17,8 +15,8 @@ integration plans through a controlled software lifecycle.
 
 ## What is in this repository
 
-Phases 1 and 2: the intelligence spine, plus the creator product that sits on top of it. Both
-are working and tested end to end.
+Phases 1 to 4: the intelligence spine, the creator product on top of it, real accounts,
+and the infrastructure to run it for real. Every phase is working and tested end to end.
 
 ```
 packages/
@@ -52,7 +50,7 @@ apps/
 
 ```bash
 npm install
-npm run verify        # lint + typecheck + 179 tests
+npm run verify        # lint + typecheck + 277 tests
 npm run dev           # api on :4000, web on :5173
 ```
 
@@ -208,14 +206,18 @@ npm run model:check      # one-off: does the configured provider answer?
 | **Creator web app: creation flow, updates, platform support, coming soon** | **implemented, tested** |
 | **Accounts, sessions, roles, tenant isolation** | **implemented, tested** |
 | **Optional model provider for fact extraction** | **implemented, tested** |
+| **Source curation: scoring, tiers, candidate probing** | **implemented, tested** |
+| **Preference learning with why / forget / reset** | **implemented, tested** |
+| **Publishing adapters: HTTP + simulated, gated on verified knowledge** | **implemented, tested** |
+| **Postgres persistence** | **implemented, contract-tested, not run against a live database** |
+| **Hosted embeddings (local default)** | **implemented, tested** |
 | Draft composer (deterministic, capability-aware) | implemented, tested |
-| Per-platform documentation curation + yield ranking | Phase 4 |
-| Email verification, password reset, per-IP rate limiting | Phase 4 |
-| Postgres persistence, real publishing adapters | Phase 4 |
+| Live verification of Postgres and the model provider | blocked from this machine; run db:check and model:check |
+| A real publishing integration | needs a verified platform API and credentials |
+| Email verification, password reset, per-IP rate limiting | Phase 5 |
 
-See `docs/PHASE-1.md` and `docs/PHASE-2.md` for scope, and `ARCHITECTURE.md` for the design.
+See `docs/PHASE-1.md` through `docs/PHASE-4.md` for scope, and `ARCHITECTURE.md` for the design.
 
 ## License
 
 Private. All rights reserved.
->>>>>>> 33bb30a (Phase 1: Creator Mall intelligence spine)
