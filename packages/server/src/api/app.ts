@@ -20,6 +20,7 @@ import { renderEvolutionCenter } from './evolution-center.js'
 import { runResearchCycle, sourceStats } from '../world-engine/pipeline.js'
 import {
   creatorOverview,
+  creatorTools as creatorToolsView,
   draftForCreator,
   validateForCreator,
   whyForCreator,
@@ -445,6 +446,10 @@ export function createApp(context: AppContext): Express {
       })()
     },
   )
+
+  app.get('/api/creator/tools', (_request, response) => {
+    response.json(creatorToolsView(context))
+  })
 
   app.get('/api/creator/coming-soon', (_request, response) => {
     response.json({ comingSoon: creatorOverview(context, undefined).comingSoon })

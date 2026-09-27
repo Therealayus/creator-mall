@@ -4,6 +4,7 @@ import type {
   ComingSoonCard,
   CreatorOption,
   CreatorPlatformCard,
+  CreatorToolCard,
   CreatorUpdateCard,
   LimitHint,
   ValidationResult,
@@ -229,4 +230,19 @@ export function fileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** What sort of thing this is, in words a creator would use. */
+export function toolKindWords(kind: CreatorToolCard['kind']): string {
+  const words: Record<CreatorToolCard['kind'], string> = {
+    FEATURE: 'A feature on the platform',
+    ENDPOINT: 'An official way to connect your own tools',
+    RESOURCE: 'Official reading',
+  }
+  return words[kind]
+}
+
+/** A platform heading for a group of tools. */
+export function toolGroupHeading(tools: ReadonlyArray<CreatorToolCard>): string {
+  return tools[0]?.platformName ?? 'Tools'
 }

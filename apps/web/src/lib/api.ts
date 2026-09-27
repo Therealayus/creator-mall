@@ -167,6 +167,41 @@ export function fetchWhy(platform: string, option: string): Promise<WhyAnswer> {
   return request<WhyAnswer>(`/api/creator/platforms/${platform}/why?option=${encodeURIComponent(option)}`)
 }
 
+// ------------------------------------------------------------------- market
+
+export interface ToolReason {
+  source: string
+  url: string | null
+  /** Already in creator words: "the platform itself". */
+  kind: string
+  checkedAt: string | null
+}
+
+export interface CreatorToolCard {
+  id: string
+  platform: string
+  platformName: string
+  name: string
+  whatItDoes: string
+  kind: 'FEATURE' | 'ENDPOINT' | 'RESOURCE'
+  confidence: 'confirmed' | 'likely'
+  howSure: string
+  url: string | null
+  appliesTo: string
+  checkedAt: string | null
+  because: ToolReason[]
+}
+
+export interface CreatorToolsResponse {
+  tools: CreatorToolCard[]
+  notice: string
+  counts: { confirmed: number; likely: number; platforms: number }
+}
+
+export function fetchTools(): Promise<CreatorToolsResponse> {
+  return request<CreatorToolsResponse>('/api/creator/tools')
+}
+
 // ---------------------------------------------------------------- media library
 
 export type AssetKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'TEXT' | 'STORYBOARD'

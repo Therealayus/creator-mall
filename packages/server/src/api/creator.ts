@@ -1,5 +1,6 @@
 import {
   composeDraft,
+  creatorTools as creatorToolsFromEvidence,
   listPreferences,
   limitHintsFor,
   nowIso,
@@ -11,6 +12,7 @@ import {
 import { z } from 'zod'
 import type {
   AdapterValidationIssue,
+  CreatorTool,
   ObservationKind,
   Recommendation,
   CreatorNotification,
@@ -164,6 +166,94 @@ export function creatorUpdateCard(
     sourceUrl: source?.url ?? null,
     whyUrl: `/platforms/${platformSlug}`,
   }
+}
+
+export interface CreatorToolCard {
+  id: string
+  platform: string
+  platformName: string
+  name: string
+  whatItDoes: string
+  kind: CreatorTool['kind']
+  /** "Confirmed" or "likely", never stronger than the evidence behind it. */
+  confidence: string
+  howSure: string
+  url: string | null
+  appliesTo: string
+  checkedAt: string | null
+  /** The evidence a creator can inspect before trusting us. */
+  because: Array<{ source: string; url: string | null; kind: string; checkedAt: string | null }>
+}
+
+export interface CreatorToolsResponse {
+  tools: CreatorToolCard[]
+  notice: string
+  counts: { confirmed: number; likely: number; platforms: number }
+}
+
+/**
+ * The Market Engine, as a creator sees it.
+ *
+ * Only tools the World Engine has verified appear here, each with the sources
+ * behind it. When nothing has been verified the answer is an empty list and an
+ * explanation, never a filler.
+ */
+export function creatorTools(context: AppContext): CreatorToolsResponse {
+  const tools = marketTools(context)
+  const cards = tools.map((tool) => ({
+    id: tool.id,
+    platform: tool.platformSlug,
+    platformName: tool.platformName,
+    name: tool.name,
+    whatItDoes: tool.whatItDoes,
+    kind: tool.kind,
+    confidence: tool.confidence === 'CONFIRMED' ? 'confirmed' : 'likely',
+    howSure: toolConfidenceWords(tool.confidence),
+    url: tool.url,
+    appliesTo: tool.capabilityLabel,
+    checkedAt: tool.lastCheckedAt,
+    because: tool.evidence.map((entry) => ({
+      source: entry.sourceName,
+      url: entry.sourceUrl,
+      kind: entry.trustLevel === 'OFFICIAL' ? 'the platform itself' : 'a source we have verified',
+      checkedAt: entry.verifiedAt,
+    })),
+  }))
+
+  return {
+    tools: cards,
+    notice:
+      cards.length === 0
+        ? 'We have not verified any tools yet. We would rather show you nothing than show you something we cannot prove.'
+        : 'Everything here comes from the platform or a source we have verified. We check it again regularly.',
+    counts: {
+      confirmed: cards.filter((card) => card.confidence === 'confirmed').length,
+      likely: cards.filter((card) => card.confidence === 'likely').length,
+      platforms: new Set(cards.map((card) => card.platform)).size,
+    },
+  }
+}
+
+/** The catalogue itself, shared by the creator view and the operator route. */
+export function marketTools(context: AppContext): CreatorTool[] {
+  return creatorToolsFromEvidence({
+    platforms: context.control.listPlatforms(),
+    facts: [...context.control.knowledge.facts.values()],
+    sources: context.control.listSources(),
+    capabilityLabels: capabilityLabels(context),
+  })
+}
+
+function capabilityLabels(context: AppContext): Map<string, string> {
+  const labels = new Map<string, string>()
+  for (const capability of context.control.capabilities.all()) labels.set(capability.key, capability.label)
+  return labels
+}
+
+function toolConfidenceWords(confidence: CreatorTool['confidence']): string {
+  return confidence === 'CONFIRMED'
+    ? 'The platform documents this itself.'
+    : 'A source we trust says this, but the platform has not confirmed it directly.'
 }
 
 export function creatorOverview(context: AppContext, creator: CreatorProfile | undefined): CreatorOverview {

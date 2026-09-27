@@ -54,6 +54,8 @@ export * from './generation/port.js'
 export * from './generation/deterministic.js'
 export * from './generation/model-copy.js'
 
+export * from './market/catalogue.js'
+
 export * from './composer/draft.js'
 
 export * from './auth/password.js'

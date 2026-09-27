@@ -346,7 +346,7 @@ guess costs one request, never a wrong belief.
 
 ## 17. Adapters as definitions
 
-A publishing integration is data — endpoint, method, field mapping, where the
+A publishing integration is data â€” endpoint, method, field mapping, where the
 published id comes back, how the credential is presented. One implementation
 (HttpPlatformAdapter) therefore serves every platform, present or future, and
 adding a platform integration requires no new class and no branch anywhere in
@@ -368,5 +368,5 @@ the product.
 
 Both degrade the same way: a provider failure falls back silently, records a
 key-free reason, and never blocks the cycle. The local defaults are not
-placeholders — knowledge is searchable and limits are extractable with no key,
+placeholders â€” knowledge is searchable and limits are extractable with no key,
 no network, and nothing about a creator leaving the machine.
