@@ -246,3 +246,32 @@ export function toolKindWords(kind: CreatorToolCard['kind']): string {
 export function toolGroupHeading(tools: ReadonlyArray<CreatorToolCard>): string {
   return tools[0]?.platformName ?? 'Tools'
 }
+
+/**
+ * The password rule, in one place.
+ *
+ * The server enforces this too. Saying it here means a creator is told what is
+ * wrong before they submit, rather than after a round trip.
+ */
+export const PASSWORD_HELP = 'At least 10 characters, with a letter and a number.'
+
+export function passwordProblems(password: string): string[] {
+  const problems: string[] = []
+  if (password.length < 10) problems.push('Use at least 10 characters.')
+  if (!/[A-Za-z]/.test(password)) problems.push('Include at least one letter.')
+  if (!/[0-9]/.test(password)) problems.push('Include at least one number.')
+  return problems
+}
+
+/**
+ * Paths that must work without a session.
+ *
+ * `App` renders the sign-in page for *every* route once nobody is signed in, so
+ * account recovery cannot live in the route table or it becomes unreachable
+ * exactly when it is needed. It is matched here instead, above the gate.
+ */
+export const PUBLIC_PATHS: ReadonlyArray<string> = ['/reset-password', '/verify-email']
+
+export function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.includes(pathname)
+}

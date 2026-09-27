@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { signIn, signUp } from '../lib/auth.js'
+import { requestPasswordReset } from '../lib/api.js'
 import {
   PLATFORM_CHOICES,
   clearFeedback,
@@ -16,12 +17,39 @@ import type { AuthFormState, AuthMode } from '../lib/auth-view.js'
 /** Sign in, or create an account. The form explains its own rules. */
 export function SignInPage(props: { onAuthenticated: () => void; initialMode?: AuthMode }): ReactNode {
   const [form, setForm] = useState<AuthFormState>(() => initialForm(props.initialMode ?? 'signin'))
+  const [resetting, setResetting] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetSent, setResetSent] = useState<{ message: string; devLink?: string } | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
 
   useEffect(() => {
     document.title = form.mode === 'signin' ? 'Sign in · Creator Mall' : 'Create an account · Creator Mall'
   }, [form.mode])
 
   const validity = validateForm(form)
+
+  /**
+   * Ask for a reset link.
+   *
+   * The answer is the same whether or not the address has an account, and the
+   * page says so, because an endpoint that says "no such user" is an account
+   * list for anyone who wants one.
+   */
+  async function sendResetLink(event: FormEvent): Promise<void> {
+    event.preventDefault()
+    const email = resetEmail.trim()
+    if (email.length < 3) {
+      setResetError('Enter the email address you signed up with.')
+      return
+    }
+    setResetError(null)
+    try {
+      const result = await requestPasswordReset(email)
+      setResetSent({ message: result.message, ...(result.devLink ? { devLink: result.devLink } : {}) })
+    } catch (cause) {
+      setResetError(cause instanceof Error ? cause.message : 'Could not send that just now')
+    }
+  }
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault()
@@ -143,6 +171,51 @@ export function SignInPage(props: { onAuthenticated: () => void; initialMode?: A
             {form.mode === 'signin' ? 'Create an account' : 'Sign in'}
           </button>
         </p>
+
+        {form.mode === 'signin' && !resetSent && (
+          <div style={{ marginTop: 12 }}>
+            <button type="button" className="link-button" onClick={() => setResetting((current) => !current)}>
+              {resetting ? 'Never mind' : 'Forgotten your password?'}
+            </button>
+
+            {resetting && (
+              <form onSubmit={(event) => void sendResetLink(event)} style={{ marginTop: 10 }}>
+                {resetError && <div className="notice stop">{resetError}</div>}
+                <div className="field">
+                  <label htmlFor="reset-email">Email</label>
+                  <input
+                    id="reset-email"
+                    type="text"
+                    autoComplete="email"
+                    value={resetEmail}
+                    onChange={(event) => {
+                      setResetEmail(event.target.value)
+                      setResetError(null)
+                    }}
+                  />
+                  <span className="help">We will send a link to set a new one.</span>
+                </div>
+                <button className="ghost" type="submit">
+                  Send me a link
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+
+        {resetSent && (
+          <div style={{ marginTop: 16 }}>
+            <div className="notice good">
+              <span>{resetSent.message}</span>
+            </div>
+            {resetSent.devLink && (
+              <p style={{ fontSize: 14 }}>
+                No mail provider is configured in development, so here is the link:{' '}
+                <a href={resetSent.devLink}>reset your password</a>
+              </p>
+            )}
+          </div>
+        )}
       </form>
     </div>
   )

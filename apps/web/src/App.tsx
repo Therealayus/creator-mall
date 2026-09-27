@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Route, Routes, useNavigate } from 'react-router-dom'
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { fetchOverview } from './lib/api.js'
+import { isPublicPath } from './lib/view-models.js'
 import type { CreatorOverview } from './lib/api.js'
 import { authedFetch, restoreSession, signOut } from './lib/auth.js'
 import type { AuthResult } from './lib/auth.js'
@@ -12,6 +13,8 @@ import { PlatformPage } from './pages/PlatformPage.js'
 import { UpdatesPage } from './pages/UpdatesPage.js'
 import { AssetsPage } from './pages/AssetsPage.js'
 import { ToolsPage } from './pages/ToolsPage.js'
+import { ResetPasswordPage } from './pages/ResetPasswordPage.js'
+import { VerifyEmailPage } from './pages/VerifyEmailPage.js'
 import { ComingSoonPage } from './pages/ComingSoonPage.js'
 import { SignInPage } from './pages/SignInPage.js'
 import { PersonalisationPage } from './pages/PersonalisationPage.js'
@@ -24,6 +27,7 @@ export function App(): ReactNode {
   const [overview, setOverview] = useState<CreatorOverview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const location = useLocation()
 
   const loadOverview = useCallback(async () => {
     setPhase('loading')
@@ -68,6 +72,15 @@ export function App(): ReactNode {
         <p className="empty">Checking what is happening across the creator ecosystem…</p>
       </div>
     )
+  }
+
+  /**
+   * Account recovery has to be reachable while signed out — that is the only
+   * time anyone needs it. It therefore sits above the session gate rather than
+   * inside the route table, which the sign-in page would otherwise swallow.
+   */
+  if (isPublicPath(location.pathname)) {
+    return location.pathname === '/verify-email' ? <VerifyEmailPage /> : <ResetPasswordPage />
   }
 
   if (phase === 'signed-out' || !session) {

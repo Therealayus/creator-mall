@@ -167,6 +167,42 @@ export function fetchWhy(platform: string, option: string): Promise<WhyAnswer> {
   return request<WhyAnswer>(`/api/creator/platforms/${platform}/why?option=${encodeURIComponent(option)}`)
 }
 
+// -------------------------------------------------------- account recovery
+
+export interface ResetRequestResult {
+  accepted: boolean
+  message: string
+  /** Only ever present outside production, where no mail provider is wired up. */
+  devToken?: string
+  devLink?: string
+}
+
+/**
+ * Recovery calls are deliberately unauthenticated: a person who cannot sign in
+ * is the entire reason these exist, so they carry no session and no CSRF token.
+ * The single-use token in the link is what authorises them.
+ */
+export function requestPasswordReset(email: string): Promise<ResetRequestResult> {
+  return request<ResetRequestResult>('/api/auth/password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export function confirmPasswordReset(token: string, password: string): Promise<{ ok: boolean; message: string }> {
+  return request<{ ok: boolean; message: string }>('/api/auth/password-reset/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
+  })
+}
+
+export function verifyEmail(token: string): Promise<{ ok: boolean; message: string }> {
+  return request<{ ok: boolean; message: string }>('/api/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
+}
+
 // ------------------------------------------------------------------- market
 
 export interface ToolReason {
