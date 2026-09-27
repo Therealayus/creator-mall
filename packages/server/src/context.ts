@@ -6,6 +6,8 @@ import { AdapterRegistry } from './adapters/registry.js'
 import { isModelConfigured, OpenRouterClient } from './ai/openrouter.js'
 import { ControlPlane } from './store/control-plane.js'
 import { FilePersistence } from './store/file-persistence.js'
+import { PostgresPersistence } from './store/postgres-persistence.js'
+import { checkSchema, createPgClient } from './store/sql-migrate.js'
 import { MemoryPersistence } from './store/persistence.js'
 import type { ControlPlaneState, PersistencePort } from './store/persistence.js'
 import { PublicFetcher } from './world-engine/fetcher.js'
@@ -39,7 +41,7 @@ export async function createContext(
   deps: { fetchImpl?: typeof fetch; seed?: boolean } = {},
 ): Promise<AppContext> {
   const config = { ...loadConfig(), ...overrides }
-  const persistence = config.DATA_DIR ? new FilePersistence(config.DATA_DIR) : new MemoryPersistence()
+  const persistence = await createPersistence(config)
 
   const stored: ControlPlaneState | null = await persistence.load().catch(() => null)
   const control = new ControlPlane(stored ?? undefined)
@@ -86,6 +88,29 @@ function createModelExtractor(config: Config): FactExtractor | null {
   })
 
   return new ModelFactExtractor({ client, maxInputChars: config.MODEL_MAX_INPUT_CHARS })
+}
+
+/**
+ * Storage is chosen by configuration, not by code: `PERSISTENCE=postgres` with
+ * a `DATABASE_URL` uses the control-plane tables, otherwise the JSON snapshot
+ * (or memory when no data directory is set).
+ */
+async function createPersistence(config: Config): Promise<PersistencePort> {
+  if (config.PERSISTENCE === 'postgres') {
+    if (!config.DATABASE_URL) {
+      throw new Error('PERSISTENCE=postgres needs DATABASE_URL. Set it, or use PERSISTENCE=json.')
+    }
+    const client = await createPgClient({
+      connectionString: config.DATABASE_URL,
+      max: config.DB_POOL_SIZE,
+    })
+    const status = await checkSchema(client)
+    if (!status.ready) {
+      throw new Error(`database not ready: ${status.reason} (run: npm run db:migrate)`)
+    }
+    return new PostgresPersistence(client)
+  }
+  return config.DATA_DIR ? new FilePersistence(config.DATA_DIR) : new MemoryPersistence()
 }
 
 /** The demo creator that makes the creator-facing surface usable on first run. */

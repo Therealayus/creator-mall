@@ -3,7 +3,13 @@ import type {
   CreatorNotification,
   CreatorProfile,
 } from '@creator-mall/core'
-import type { CreatorAccount } from '@creator-mall/core'
+import type {
+  CreatorAccount,
+  CreatorObservation,
+  LearnedPreference,
+  PreferenceCounter,
+  Session,
+} from '@creator-mall/core'
 import type {
   ChangeProposal,
   DependencyEdge,
@@ -34,11 +40,16 @@ export interface ControlPlaneState {
   templates: TemplateDefinition[]
   creators: CreatorProfile[]
   accounts: CreatorAccount[]
+  sessions: Session[]
   notifications: CreatorNotification[]
   impacts: CreatorImpact[]
   knowledge: SerializedKnowledge
   dependencyEdges: DependencyEdge[]
   jobRuns: ResearchJobRun[]
+  observations: CreatorObservation[]
+  preferences: LearnedPreference[]
+  /** Incremental learning tallies, kept beside the observations they come from. */
+  preferenceCounters: PreferenceCounter[]
 }
 
 export interface PersistencePort {

@@ -67,6 +67,12 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((value) => value === 'true'),
+
+  // ─── Storage ───────────────────────────────────────────────────────────────
+  DATABASE_URL: z.string().default(''),
+  /** `json` keeps the file snapshot; `postgres` uses the control-plane tables. */
+  PERSISTENCE: z.enum(['json', 'postgres']).default('json'),
+  DB_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(5),
 })
 
 export type Config = z.infer<typeof schema> & { allowedHosts: Set<string> }

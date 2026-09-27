@@ -342,6 +342,12 @@ export class ControlPlane {
       },
       dependencyEdges: this.graph.toJSON(),
       jobRuns: this.jobRuns,
+      // Learning state travels with the rest of the control plane, so a restart
+      // does not erase the evidence behind a recommendation.
+      sessions: this.listSessions(),
+      observations: [...this.preferences.observations.values()].flat(),
+      preferences: [...this.preferences.preferences.values()],
+      preferenceCounters: this.preferences.counters,
     }
   }
 
@@ -353,6 +359,15 @@ export class ControlPlane {
     for (const proposal of state.proposals) this.addProposal(proposal)
     for (const creator of state.creators) this.creators.set(creator.id, creator)
     for (const account of state.accounts ?? []) this.accounts.set(account.id, account)
+    for (const session of state.sessions ?? []) this.sessions.set(session.id, session)
+    for (const creator of (state.observations ?? []).map((observation) => observation.creatorId)) {
+      this.preferences.observations.set(creator, [])
+    }
+    for (const observation of state.observations ?? []) {
+      this.preferences.observations.get(observation.creatorId)?.push(observation)
+    }
+    for (const preference of state.preferences ?? []) this.preferences.preferences.set(preference.id, preference)
+    this.preferences.counters = [...(state.preferenceCounters ?? [])]
     for (const notification of state.notifications) this.addNotification(notification)
     for (const impact of state.impacts) this.addImpact(impact)
     for (const template of state.templates) this.addTemplate(template)

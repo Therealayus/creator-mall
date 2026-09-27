@@ -110,21 +110,63 @@ const PATTERNS: Array<{
   },
 ]
 
+export interface PreferenceCounter {
+  /** Stable identity: creator, pattern and value. */
+  id: string
+  creatorId: string
+  key: string
+  value: string
+  weight: number
+}
+
 export interface PreferenceStore {
   observations: Map<string, CreatorObservation[]>
   preferences: Map<string, LearnedPreference>
   /**
-   * Running tally per preference and value.
+   * Running tallies, kept flat so they survive serialisation.
    *
    * Counters are maintained incrementally rather than replayed from history:
    * replaying would let an old "yes" resurrect a belief we have since dropped
    * because of newer "no"s.
    */
-  counters: Map<string, Map<string, number>>
+  counters: PreferenceCounter[]
 }
 
 export function createPreferenceStore(): PreferenceStore {
-  return { observations: new Map(), preferences: new Map(), counters: new Map() }
+  return { observations: new Map(), preferences: new Map(), counters: [] }
+}
+
+function counterId(creatorId: string, key: string, value: string): string {
+  return `${creatorId}::${key}::${value}`
+}
+
+function countersFor(store: PreferenceStore, creatorId: string, key: string): PreferenceCounter[] {
+  return store.counters.filter((counter) => counter.creatorId === creatorId && counter.key === key)
+}
+
+function adjustCounter(
+  store: PreferenceStore,
+  creatorId: string,
+  key: string,
+  value: string,
+  delta: number,
+): void {
+  const id = counterId(creatorId, key, value)
+  const existing = store.counters.find((counter) => counter.id === id)
+  const weight = Math.max(0, (existing?.weight ?? 0) + delta)
+  if (weight === 0) {
+    store.counters = store.counters.filter((counter) => counter.id !== id)
+    return
+  }
+  if (existing) {
+    existing.weight = weight
+    return
+  }
+  store.counters.push({ id, creatorId, key, value, weight })
+}
+
+function counterWeight(store: PreferenceStore, creatorId: string, key: string, value: string): number {
+  return store.counters.find((counter) => counter.id === counterId(creatorId, key, value))?.weight ?? 0
 }
 
 function observationsFor(store: PreferenceStore, creatorId: string): CreatorObservation[] {
@@ -149,20 +191,18 @@ export function recordObservation(
 
     const id = preferenceId(observation.creatorId, pattern.key)
     const previous = store.preferences.get(id)
-    const tally = store.counters.get(id) ?? new Map<string, number>()
 
     if (pattern.contradicts?.(observation)) {
       // A contradiction withdraws support from whatever we currently believe.
-      const target = previous?.value ?? leadingValue(tally)
-      if (target !== null) tally.set(target, Math.max(0, (tally.get(target) ?? 0) - 1))
+      const target = previous?.value ?? leadingValue(countersFor(store, observation.creatorId, pattern.key))
+      if (target !== null) adjustCounter(store, observation.creatorId, pattern.key, target, -1)
     } else {
       const derived = pattern.derive(observation)
-      if (derived) tally.set(derived.value, (tally.get(derived.value) ?? 0) + derived.weight)
+      if (derived) adjustCounter(store, observation.creatorId, pattern.key, derived.value, derived.weight)
     }
-    store.counters.set(id, tally)
 
-    const value = leadingValue(tally)
-    const occurrences = value === null ? 0 : Math.round(tally.get(value) ?? 0)
+    const value = leadingValue(countersFor(store, observation.creatorId, pattern.key))
+    const occurrences = value === null ? 0 : counterWeight(store, observation.creatorId, pattern.key, value)
 
     // The pattern no longer holds often enough to trust: stop believing it.
     if (value === null || occurrences < pattern.threshold) {
@@ -196,13 +236,13 @@ export function recordObservation(
   return { learned: listPreferences(store, observation.creatorId), changed }
 }
 
-function leadingValue(tally: ReadonlyMap<string, number>): string | null {
+function leadingValue(counters: ReadonlyArray<{ value: string; weight: number }>): string | null {
   let best: string | null = null
   let bestCount = 0
-  for (const [value, count] of tally) {
-    if (count > bestCount || (count === bestCount && best !== null && value < best)) {
-      best = value
-      bestCount = count
+  for (const counter of counters) {
+    if (counter.weight > bestCount || (counter.weight === bestCount && best !== null && counter.value < best)) {
+      best = counter.value
+      bestCount = counter.weight
     }
   }
   return best
@@ -253,7 +293,7 @@ export function resetPersonalization(store: PreferenceStore, creatorId: string):
   for (const preference of listPreferences(store, creatorId)) {
     store.preferences.delete(preference.id)
     // Counters go too: a reset means we start learning from scratch.
-    store.counters.delete(preference.id)
+    store.counters = store.counters.filter((counter) => counter.creatorId !== creatorId)
   }
   return { preferences, observations }
 }
