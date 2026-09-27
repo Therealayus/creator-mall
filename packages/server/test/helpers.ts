@@ -138,6 +138,8 @@ export async function forkContext(
 
 export interface SignedInClient {
   get: (path: string, init?: RequestInit) => Promise<RouteResponse>
+  /** Byte-exact read, for asserting that binary responses are not mangled. */
+  getBytes: (path: string, init?: RequestInit) => Promise<{ status: number; contentType: string; body: Uint8Array }>
   accountId: string
   csrf: string | null
 }
@@ -150,42 +152,71 @@ export async function signedInClient(
   baseUrl: string,
   overrides: { email?: string; platformSlugs?: string[] } = {},
 ): Promise<SignedInClient> {
+  const email = overrides.email ?? 'creator@example.com'
+  return authenticate(baseUrl, '/api/auth/register', {
+    email,
+    password: 'filminginthecloud7',
+    displayName: 'Test creator',
+    platformSlugs: overrides.platformSlugs ?? ['instagram'],
+  })
+}
+
+/** Signs in an account that already exists, for tests that restart a process. */
+export async function signedInExistingClient(baseUrl: string, email: string): Promise<SignedInClient> {
+  return authenticate(baseUrl, '/api/auth/login', { email, password: 'filminginthecloud7' })
+}
+
+async function authenticate(baseUrl: string, path: string, body: unknown): Promise<SignedInClient> {
   const cookie = { value: '' }
+
+  const send = async (route: string, init?: RequestInit): Promise<Response> => {
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    if (cookie.value) headers.cookie = cookie.value
+    if (state.csrf && init?.method && init.method !== 'GET') headers['x-csrf-token'] = state.csrf
+
+    const extra = (init?.headers ?? {}) as Record<string, string>
+    const response = await fetch(baseUrl + route, { ...init, headers: { ...headers, ...extra } })
+    const setCookie = response.headers.get('set-cookie')
+    if (setCookie) cookie.value = setCookie.split(';')[0] ?? ''
+    return response
+  }
+
+  const readCsrf = async (text: string, ok: boolean): Promise<void> => {
+    if (state.csrf !== null || !ok) return
+    try {
+      state.csrf = (JSON.parse(text) as { csrfToken?: string }).csrfToken ?? null
+    } catch {
+      state.csrf = null
+    }
+  }
+
   const state: SignedInClient = {
     accountId: '',
     csrf: null,
-    get: async (path, init) => {
-      const headers: Record<string, string> = { 'content-type': 'application/json' }
-      if (cookie.value) headers.cookie = cookie.value
-      if (state.csrf && init?.method && init.method !== 'GET') headers['x-csrf-token'] = state.csrf
-
-      const extra = (init?.headers ?? {}) as Record<string, string>
-      const response = await fetch(baseUrl + path, { ...init, headers: { ...headers, ...extra } })
-      const setCookie = response.headers.get('set-cookie')
-      if (setCookie) cookie.value = setCookie.split(';')[0] ?? ''
-      const body = await response.text()
-      if (state.csrf === null && response.ok) {
-        try {
-          state.csrf = (JSON.parse(body) as { csrfToken?: string }).csrfToken ?? null
-        } catch {
-          state.csrf = null
-        }
+    get: async (route, init) => {
+      const response = await send(route, init)
+      const text = await response.text()
+      await readCsrf(text, response.ok)
+      return { status: response.status, contentType: response.headers.get('content-type') ?? '', body: text }
+    },
+    getBytes: async (route, init) => {
+      const response = await send(route, init)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      await readCsrf(new TextDecoder().decode(bytes), response.ok)
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') ?? '',
+        body: bytes,
       }
-      return { status: response.status, contentType: response.headers.get('content-type') ?? '', body }
     },
   }
 
-  const created = await state.get('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify({
-      email: overrides.email ?? 'creator@example.com',
-      password: 'filminginthecloud7',
-      displayName: 'Test creator',
-      platformSlugs: overrides.platformSlugs ?? ['instagram'],
-    }),
-  })
-  if (created.status !== 201) throw new Error(`could not sign up: ${created.status} ${created.body}`)
-  state.accountId = (JSON.parse(created.body) as { account: { id: string } }).account.id
+  const created = await state.get(path, { method: 'POST', body: JSON.stringify(body) })
+  if (created.status !== 200 && created.status !== 201) {
+    throw new Error(`could not authenticate: ${created.status} ${created.body}`)
+  }
+  const payload = JSON.parse(created.body) as { account?: { id: string } }
+  state.accountId = payload.account?.id ?? ''
   return state
 }
 
@@ -194,6 +225,8 @@ export interface RunningServer {
   baseUrl: string
   close: () => Promise<void>
   get: (path: string, init?: RequestInit) => Promise<RouteResponse>
+  /** Byte-exact read, for asserting that binary responses are not mangled. */
+  getBytes: (path: string, init?: RequestInit) => Promise<{ status: number; contentType: string; body: Uint8Array }>
 }
 
 export async function startServer(context: AppContext): Promise<RunningServer> {
@@ -227,6 +260,14 @@ export async function startServer(context: AppContext): Promise<RunningServer> {
         status: response.status,
         contentType: response.headers.get('content-type') ?? '',
         body: await response.text(),
+      }
+    },
+    getBytes: async (path, init) => {
+      const response = await fetch(baseUrl + path, init)
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type') ?? '',
+        body: new Uint8Array(await response.arrayBuffer()),
       }
     },
   }

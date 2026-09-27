@@ -166,3 +166,74 @@ export function fetchDraft(input: {
 export function fetchWhy(platform: string, option: string): Promise<WhyAnswer> {
   return request<WhyAnswer>(`/api/creator/platforms/${platform}/why?option=${encodeURIComponent(option)}`)
 }
+
+// ---------------------------------------------------------------- media library
+
+export type AssetKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'TEXT' | 'STORYBOARD'
+
+export interface AssetSummary {
+  id: string
+  kind: AssetKind
+  title: string
+  sizeBytes: number
+  producedBy: string
+  /** True only when a model actually wrote it. A rendered poster is not AI. */
+  madeWithAI: boolean
+  createdAt: string
+  platformSlug: string | null
+  origin: 'GENERATED' | 'UPLOADED'
+  mimeType: string
+}
+
+export interface GenerationResult {
+  asset: AssetSummary
+  /** The artifact itself: poster SVG, shot list, narration script or copy. */
+  content: string
+  meta: {
+    copy?: { hook: string; body: string; cta: string; hashtags: string[] }
+    poster?: { width: number; height: number; alt: string; producedBy: string }
+    storyboard?: { shots: Array<{ order: number; durationSeconds: number; shot: string; onScreen: string; voiceover: string }> }
+    audio?: { totalSeconds: number; segments: Array<{ at: number; text: string }> }
+  }
+}
+
+export function generateAsset(input: {
+  platform: string
+  option: string
+  brief: string
+  tone?: string
+}): Promise<GenerationResult> {
+  return authedFetch<GenerationResult>('/api/creator/generate', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function fetchAssets(kind?: AssetKind): Promise<{ assets: AssetSummary[] }> {
+  const query = kind ? `?kind=${encodeURIComponent(kind)}` : ''
+  return request<{ assets: AssetSummary[] }>(`/api/creator/assets${query}`)
+}
+
+/** Where an asset's bytes are served from, for a preview or a download link. */
+export function assetUrl(assetId: string): string {
+  return `/api/creator/assets/${encodeURIComponent(assetId)}`
+}
+
+export function deleteAsset(assetId: string): Promise<{ removed: boolean }> {
+  return authedFetch<{ removed: boolean }>(`/api/creator/assets/${encodeURIComponent(assetId)}`, {
+    method: 'DELETE',
+  })
+}
+
+/**
+ * Uploads a file as the request body, with its own content type. The server does
+ * the same, so no multipart encoding is involved on either side.
+ */
+export function uploadAsset(file: File, title?: string): Promise<{ asset: AssetSummary }> {
+  const query = title ? `?title=${encodeURIComponent(title)}` : ''
+  return authedFetch<{ asset: AssetSummary }>(`/api/creator/assets${query}`, {
+    method: 'POST',
+    headers: { 'content-type': file.type || 'application/octet-stream' },
+    body: file,
+  })
+}

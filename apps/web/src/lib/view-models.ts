@@ -1,4 +1,6 @@
 import type {
+  AssetKind,
+  AssetSummary,
   ComingSoonCard,
   CreatorOption,
   CreatorPlatformCard,
@@ -192,4 +194,39 @@ export function relativeTime(iso: string | null, now: number = Date.now()): stri
   const days = Math.floor(hours / 24)
   if (days < 30) return `${days} d ago`
   return new Date(iso).toISOString().slice(0, 10)
+}
+
+/** What an asset is, in the creator's words rather than ours. */
+export function assetKindLabel(kind: AssetKind): string {
+  const labels: Record<AssetKind, string> = {
+    IMAGE: 'Poster',
+    VIDEO: 'Video',
+    AUDIO: 'Audio',
+    TEXT: 'Text',
+    STORYBOARD: 'Shot list',
+  }
+  return labels[kind]
+}
+
+/**
+ * One honest line about an asset: what made it, and whether a model was
+ * involved. A rendered artifact must never be described as AI output.
+ */
+export function assetHeadline(asset: AssetSummary, now: number = Date.now()): string {
+  const kind = assetKindLabel(asset.kind)
+  const made = asset.origin === 'UPLOADED' ? 'You added this' : 'We made this for you'
+  const author = asset.madeWithAI ? 'Written by a model' : 'Made here, not by a model'
+  return `${kind} · ${made} · ${author} · ${relativeTime(asset.createdAt, now)}`
+}
+
+/** Only image types get an inline preview; anything else gets a link. */
+export function isPreviewable(asset: AssetSummary): boolean {
+  return asset.mimeType.startsWith('image/')
+}
+
+export function fileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }

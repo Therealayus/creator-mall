@@ -13,6 +13,7 @@ import type {
   GeneratedImage,
   GeneratedStoryboard,
   ImageGenerator,
+  MediaAsset,
   PlatformState,
   SocialPlatform,
   VideoGenerator,
@@ -180,6 +181,8 @@ export function assetView(asset: {
   modelGenerated: boolean
   createdAt: string
   platformSlug: string | null
+  origin: MediaAsset['origin']
+  mimeType: string
 }): Record<string, unknown> {
   return {
     id: asset.id,
@@ -190,6 +193,10 @@ export function assetView(asset: {
     madeWithAI: asset.modelGenerated,
     createdAt: asset.createdAt,
     platformSlug: asset.platformSlug,
+    // Whether the creator made this or we did is something they are entitled to
+    // see, not an internal detail.
+    origin: asset.origin,
+    mimeType: asset.mimeType,
   }
 }
 

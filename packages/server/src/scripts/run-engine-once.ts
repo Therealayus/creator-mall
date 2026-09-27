@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   for (const event of result.events) {
     console.log(`- [${event.riskLevel}] ${event.title} (${event.trustLevel})`)
   }
-  await context.persistence.save(context.control.toState())
+  await context.persist()
 }
 
 main().catch((error: unknown) => {

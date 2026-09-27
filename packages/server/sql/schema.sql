@@ -212,3 +212,21 @@ CREATE TABLE IF NOT EXISTS cm_preference_counter (
   value      text NOT NULL,
   weight     integer NOT NULL DEFAULT 0
 );
+
+-- Asset records for the media library. The bytes live behind the asset storage
+-- port; this table is the index, so it is deleted with the creator.
+CREATE TABLE IF NOT EXISTS cm_media_asset (
+  id         text PRIMARY KEY,
+  creator_id text NOT NULL,
+  kind       text NOT NULL,
+  created_at timestamptz NOT NULL,
+  doc        jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cm_media_asset_creator_idx ON cm_media_asset (creator_id, created_at DESC);
+
+-- Which creator profile belongs to which account. Without this row a signed-in
+-- creator has no profile after a restart.
+CREATE TABLE IF NOT EXISTS cm_profile_account_link (
+  account_id text PRIMARY KEY REFERENCES cm_account (id) ON DELETE CASCADE,
+  doc        jsonb NOT NULL
+);

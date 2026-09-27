@@ -22,6 +22,7 @@ import type { ResearchJobRun } from '@creator-mall/core'
 import type { SocialPlatform } from '@creator-mall/core'
 import type { Source } from '@creator-mall/core'
 import type { KnowledgeChunk, KnowledgeDocument, KnowledgeFact, KnowledgeVersion } from '@creator-mall/core'
+import type { MediaAsset } from '@creator-mall/core'
 
 export interface SerializedKnowledge {
   documents: KnowledgeDocument[]
@@ -50,6 +51,18 @@ export interface ControlPlaneState {
   preferences: LearnedPreference[]
   /** Incremental learning tallies, kept beside the observations they come from. */
   preferenceCounters: PreferenceCounter[]
+  /**
+   * Asset records. The bytes live behind the asset storage port, so this is the
+   * index that survives a restart, not the files themselves.
+   */
+  assets?: MediaAsset[]
+  /** Which creator profile belongs to which account. */
+  profileAccountLinks?: ProfileAccountLink[]
+}
+
+export interface ProfileAccountLink {
+  accountId: string
+  profileId: string
 }
 
 export interface PersistencePort {

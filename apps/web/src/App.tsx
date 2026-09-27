@@ -10,6 +10,7 @@ import { HomePage } from './pages/HomePage.js'
 import { CreatePage } from './pages/CreatePage.js'
 import { PlatformPage } from './pages/PlatformPage.js'
 import { UpdatesPage } from './pages/UpdatesPage.js'
+import { AssetsPage } from './pages/AssetsPage.js'
 import { ComingSoonPage } from './pages/ComingSoonPage.js'
 import { SignInPage } from './pages/SignInPage.js'
 import { PersonalisationPage } from './pages/PersonalisationPage.js'
@@ -94,6 +95,7 @@ export function App(): ReactNode {
         <Route path="/platforms" element={<HomePage overview={overview} platformsOnly />} />
         <Route path="/platforms/:platform" element={<PlatformPage overview={overview} />} />
         <Route path="/updates" element={<UpdatesPage overview={overview} />} />
+        <Route path="/library" element={<AssetsPage />} />
         <Route path="/coming-soon" element={<ComingSoonPage overview={overview} />} />
         <Route path="/you" element={<PersonalisationPage authedFetch={authedFetch} />} />
         <Route path="*" element={<HomePage overview={overview} />} />

@@ -6,6 +6,7 @@ const LINKS: Array<{ to: string; label: string }> = [
   { to: '/create', label: 'Create' },
   { to: '/platforms', label: 'Platform support' },
   { to: '/updates', label: 'Your updates' },
+  { to: '/library', label: 'Your library' },
   { to: '/coming-soon', label: 'Coming soon' },
   { to: '/you', label: "What we've learned" },
 ]

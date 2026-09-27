@@ -1,5 +1,6 @@
 import type { Config } from './config.js'
 import { loadConfig } from './config.js'
+import { join, resolve } from 'node:path'
 import { HostedEmbeddingProvider, LocalEmbeddingProvider, ModelFactExtractor } from '@creator-mall/core'
 import type { CreatorProfile, EmbeddingProvider, FactExtractor, SocialPlatform } from '@creator-mall/core'
 import { attachRegistryToControlPlane, buildAdapterRegistry } from './adapters/registry.js'
@@ -7,6 +8,8 @@ import type { AdapterRegistry, HttpAdapterDefinition } from './adapters/registry
 import { isModelConfigured, OpenRouterClient, redactSecrets } from './ai/openrouter.js'
 import { ControlPlane } from './store/control-plane.js'
 import { InMemoryAssetStorage, MediaLibrary } from './store/media-library.js'
+import type { AssetStorage } from './store/media-library.js'
+import { FileAssetStorage } from './store/media-library.js'
 import { FilePersistence } from './store/file-persistence.js'
 import { PostgresPersistence } from './store/postgres-persistence.js'
 import { checkSchema, createPgClient } from './store/sql-migrate.js'
@@ -31,6 +34,8 @@ export interface AppContext {
   modelClient: OpenRouterClient | null
   /** Generated and uploaded assets. */
   media: MediaLibrary
+  /** Saves the control plane and the asset index together. */
+  persist: () => Promise<void>
   /**
    * Which creator the web app is acting as when no one is signed in.
    * Phase 3 adds real accounts; this keeps local development usable without a
@@ -56,6 +61,14 @@ export async function createContext(
 
   if (deps.seed !== false) seedControlPlane(control)
 
+  // Asset records come back with the rest of the state; the bytes are re-read
+  // through the storage port, so a restart restores the library, not just a list.
+  const media = new MediaLibrary(createAssetStorage(config))
+  media.hydrate(stored?.assets ?? [])
+
+  const persist = (): Promise<void> =>
+    persistence.save({ ...control.toState(), assets: media.toJSON() })
+
   const fetcher = new PublicFetcher(config, deps.fetchImpl ?? fetch)
   const adapters = buildAdapterRegistry({
     definitions: loadIntegrationDefinitions(),
@@ -74,7 +87,8 @@ export async function createContext(
     modelExtractor: createModelExtractor(config),
     embeddingProvider: createEmbeddingProvider(config),
     modelClient: createModelClient(config),
-    media: new MediaLibrary(new InMemoryAssetStorage()),
+    media,
+    persist,
     creatorSession: () => {
       if (config.CREATOR_ID) {
         const selected = control.getCreator(config.CREATOR_ID)
@@ -104,6 +118,17 @@ function createModelExtractor(config: Config): FactExtractor | null {
   })
 
   return new ModelFactExtractor({ client, maxInputChars: config.MODEL_MAX_INPUT_CHARS })
+}
+
+/**
+ * Where asset bytes live. Files under the data directory by default, so a
+ * restart does not lose a creator's work; memory when the data directory is
+ * switched off or ASSET_STORAGE says so, which is what the test suite uses.
+ */
+function createAssetStorage(config: Config): AssetStorage {
+  if (config.ASSET_STORAGE === 'memory') return new InMemoryAssetStorage()
+  if (!config.DATA_DIR) return new InMemoryAssetStorage()
+  return new FileAssetStorage(join(resolve(config.DATA_DIR), 'assets'))
 }
 
 /**

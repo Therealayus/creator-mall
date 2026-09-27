@@ -37,7 +37,6 @@ export function createApp(context: AppContext): Express {
   app.use(helmet({ contentSecurityPolicy: false }))
   app.use(cors())
   app.use(express.json({ limit: '256kb' }))
-
   // Identity first: every later guard can rely on request.account / request.session.
   app.use(attachSession(context))
   app.use('/api/auth', authRoutes(context))
@@ -338,6 +337,7 @@ export function createApp(context: AppContext): Express {
           },
           output.content,
         )
+        await context.persist()
 
         return response.json({
           asset: assetView(asset),
@@ -371,9 +371,12 @@ export function createApp(context: AppContext): Express {
 
         const stored = await context.media.read(asset.id)
         if (!stored) return response.status(410).json({ error: 'The file behind this asset is gone.' })
+        // Send the bytes as they were stored. Converting to a string here would
+        // quietly corrupt anything that is not text, such as an uploaded image.
         return response
-          .type(asset.mimeType)
-          .send(Buffer.from(stored.body).toString('utf8'))
+          .type(stored.contentType || asset.mimeType)
+          .set('content-disposition', `inline; filename="${safeFilename(asset.title, asset.mimeType)}"`)
+          .send(Buffer.from(stored.body))
       } catch (error) {
         return next(error)
       }
@@ -387,9 +390,61 @@ export function createApp(context: AppContext): Express {
       if (!creator || !asset) return response.status(404).json({ error: 'unknown asset' })
       if (asset.creatorId !== creator.id) return response.status(403).json({ error: 'That is not your asset.' })
       await context.media.remove(asset.id)
+      await context.persist()
       return response.json({ removed: true })
     })()
   })
+
+  /**
+   * Upload. The file is the raw request body and its own content type, so the
+   * route works for any media type without inventing a multipart parser, and a
+   * browser can post a File directly.
+   */
+  app.post(
+    '/api/creator/assets',
+    express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }),
+    (request, response, next) => {
+      void (async () => {
+        try {
+          const creator = currentProfile(context, request)
+          if (!creator) return response.status(404).json({ error: 'no creator profile' })
+
+          const body: unknown = request.body
+          if (!Buffer.isBuffer(body) || body.byteLength === 0) {
+            return response.status(400).json({ error: 'Send the file itself as the request body.' })
+          }
+          if (body.byteLength > MAX_UPLOAD_BYTES) {
+            return response.status(413).json({ error: `Files must be under ${MAX_UPLOAD_BYTES} bytes.` })
+          }
+
+          const mimeType = (request.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim()
+          const requestedKind = queryString(request.query.kind) as AssetKind | ''
+          const kind = requestedKind && ASSET_KINDS.includes(requestedKind) ? requestedKind : kindForMimeType(mimeType)
+          const title = (queryString(request.query.title) || defaultTitleFor(mimeType)).slice(0, 160)
+
+          const asset = await context.media.create(
+            {
+              creatorId: creator.id,
+              kind,
+              origin: 'UPLOADED',
+              title,
+              mimeType,
+              brief: '',
+              platformSlug: null,
+              capabilityKey: null,
+              producedBy: `uploaded by the creator`,
+              modelGenerated: false,
+            },
+            new Uint8Array(body),
+          )
+          await context.persist()
+          return response.status(201).json({ asset: assetView(asset) })
+        } catch (error) {
+          return next(error)
+        }
+      })()
+    },
+  )
 
   app.get('/api/creator/coming-soon', (_request, response) => {
     response.json({ comingSoon: creatorOverview(context, undefined).comingSoon })
@@ -469,7 +524,7 @@ export function createApp(context: AppContext): Express {
           respectSchedule: !body.ignoreSchedule,
           maxSourcesPerRun: body.maxSources,
         })
-        await context.persistence.save(context.control.toState())
+        await context.persist()
         response.json({ run: result })
       } catch (error) {
         next(error)
@@ -527,6 +582,49 @@ function queryString(value: unknown): string {
   if (typeof value === 'string') return value
   if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
   return ''
+}
+
+/** Uploads are capped so one request cannot exhaust memory or disk. */
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+const MIME_KINDS: Array<{ match: RegExp; kind: AssetKind }> = [
+  { match: /image\/(png|jpe?g|webp|gif|avif|svg\+xml)/, kind: 'IMAGE' },
+  { match: /video\//, kind: 'VIDEO' },
+  { match: /audio\//, kind: 'AUDIO' },
+  { match: /text\//, kind: 'TEXT' },
+]
+
+/** A sensible kind for an upload, so the library does not need one from the caller. */
+function kindForMimeType(mimeType: string): AssetKind {
+  return MIME_KINDS.find((entry) => entry.match.test(mimeType))?.kind ?? 'TEXT'
+}
+
+const MIME_EXTENSIONS: Record<string, string> = {
+  'image/svg+xml': 'svg',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'audio/mpeg': 'mp3',
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+}
+
+/** A download name that cannot be used to escape a directory or inject a header. */
+function safeFilename(title: string, mimeType: string): string {
+  const base = title
+    .replace(/[^A-Za-z0-9._ -]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/^[.-]+/, '')
+    .slice(0, 60)
+  const extension = MIME_EXTENSIONS[mimeType] ?? 'bin'
+  return base.length > 0 ? `${base}.${extension}` : `asset.${extension}`
+}
+
+function defaultTitleFor(mimeType: string): string {
+  const label = mimeType.split('/')[1] ?? 'file'
+  return `Uploaded ${label.replace(/[+.]/g, ' ')}`
 }
 
 /**

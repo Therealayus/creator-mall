@@ -33,6 +33,11 @@ const schema = z.object({
 
   /** Directory for the JSON control-plane snapshot. Empty = memory only. */
   DATA_DIR: z.string().default(''),
+  /**
+   * Where generated and uploaded asset bytes live. Defaults to files under
+   * DATA_DIR when one is configured, and memory otherwise.
+   */
+  ASSET_STORAGE: z.enum(['file', 'memory']).optional(),
 
   /** World Engine cadence. */
   RESEARCH_INTERVAL_MS: z.coerce.number().int().min(30_000).default(15 * 60_000),

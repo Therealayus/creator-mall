@@ -1,4 +1,4 @@
-import type { ControlPlaneState, PersistencePort } from './persistence.js'
+import type { ControlPlaneState, PersistencePort, ProfileAccountLink } from './persistence.js'
 import type {
   ChangeProposal,
   CreatorAccount,
@@ -11,6 +11,7 @@ import type {
   KnowledgeChunk,
   KnowledgeDocument,
   KnowledgeFact,
+  MediaAsset,
   KnowledgeVersion,
   LearnedPreference,
   PlatformSnapshot,
@@ -60,6 +61,12 @@ export class PostgresPersistence implements PersistencePort {
     state.knowledge.facts = await this.docs<KnowledgeFact>('SELECT doc FROM cm_knowledge_fact ORDER BY id')
     state.accounts = await this.docs<CreatorAccount>('SELECT doc FROM cm_account ORDER BY created_at')
     state.sessions = await this.docs<Session>('SELECT doc FROM cm_session ORDER BY id')
+    state.assets = await this.docs<MediaAsset>('SELECT doc FROM cm_media_asset ORDER BY created_at DESC')
+    for (const link of await this.docs<ProfileAccountLink>(
+      'SELECT doc FROM cm_profile_account_link ORDER BY account_id',
+    )) {
+      state.profileAccountLinks = [...(state.profileAccountLinks ?? []), link]
+    }
     state.creators = await this.docs<CreatorProfile>('SELECT doc FROM cm_creator_profile ORDER BY id')
     state.notifications = await this.docs<CreatorNotification>('SELECT doc FROM cm_notification ORDER BY created_at DESC')
     state.impacts = await this.docs<CreatorImpact>('SELECT doc FROM cm_impact ORDER BY id')
@@ -163,6 +170,21 @@ export class PostgresPersistence implements PersistencePort {
           creator.id,
           creator.createdAt,
           json(creator),
+        ])
+      }
+      for (const asset of state.assets ?? []) {
+        await tx.query('INSERT INTO cm_media_asset (id, creator_id, kind, created_at, doc) VALUES ($1,$2,$3,$4,$5)', [
+          asset.id,
+          asset.creatorId,
+          asset.kind,
+          asset.createdAt,
+          json(asset),
+        ])
+      }
+      for (const link of state.profileAccountLinks ?? []) {
+        await tx.query('INSERT INTO cm_profile_account_link (account_id, doc) VALUES ($1,$2)', [
+          link.accountId,
+          json(link),
         ])
       }
       for (const notification of state.notifications) {
@@ -304,5 +326,7 @@ function emptyState(): ControlPlaneState {
     observations: [],
     preferences: [],
     preferenceCounters: [],
+    assets: [],
+    profileAccountLinks: [],
   }
 }

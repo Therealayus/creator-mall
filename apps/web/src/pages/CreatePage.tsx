@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { fetchDraft, recordObservation, validateContent } from '../lib/api.js'
-import type { CreatorOption, CreatorOverview, DraftResult, ValidationResult } from '../lib/api.js'
+import { assetUrl, fetchDraft, generateAsset, recordObservation, validateContent } from '../lib/api.js'
+import type { CreatorOption, CreatorOverview, DraftResult, GenerationResult, ValidationResult } from '../lib/api.js'
 import {
   characterCounter,
   groupOptions,
@@ -43,6 +43,7 @@ export function CreatePage(props: { overview: CreatorOverview }): ReactNode {
   const [mediaCount, setMediaCount] = useState(0)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [draft, setDraft] = useState<DraftResult | null>(null)
+  const [made, setMade] = useState<GenerationResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -103,6 +104,32 @@ export function CreatePage(props: { overview: CreatorOverview }): ReactNode {
       void recordObservation({ kind: 'PLATFORM_ADDED', subject: platformSlug, platformSlug }).catch(() => undefined)
     }
   }, [platformSlug])
+
+  /**
+   * Produces the real artifact rather than a draft: a poster, a shot list or a
+   * narration script, saved to the creator's library. Refused options never
+   * reach this, because the option list only offers confirmed ones.
+   */
+  async function makeIt(): Promise<void> {
+    if (!platform || !option) return
+    setBusy(true)
+    try {
+      const result = await generateAsset({ platform: platform.slug, option: option.key, brief })
+      setMade(result)
+      setDraft(null)
+      setError(null)
+      void recordObservation({
+        kind: 'DRAFT_ACCEPTED',
+        subject: option.key,
+        platformSlug: platform.slug,
+        detail: `made:${result.asset.kind};length:${brief.length}`,
+      }).catch(() => undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not make that just now')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   if (!platform) {
     return (
@@ -242,6 +269,14 @@ export function CreatePage(props: { overview: CreatorOverview }): ReactNode {
                 <button className="primary" disabled={busy} onClick={() => void buildDraft()} title={canDraft ? '' : 'Tell us what this is about first'}>
                   {busy ? 'Working…' : 'Build a starting point'}
                 </button>
+                <button
+                  className="primary"
+                  disabled={busy || !canDraft}
+                  onClick={() => void makeIt()}
+                  title={canDraft ? '' : 'Tell us what this is about first'}
+                >
+                  {busy ? 'Working…' : 'Make it for me'}
+                </button>
                 <button className="ghost" disabled={busy} onClick={() => void runValidation()}>
                   Check my post
                 </button>
@@ -249,6 +284,62 @@ export function CreatePage(props: { overview: CreatorOverview }): ReactNode {
                   Platform details
                 </button>
               </div>
+
+              {made && (
+                <div style={{ marginTop: 18 }}>
+                  <div className="section-title">Saved to your library</div>
+                  <p className="section-hint">
+                    {made.asset.madeWithAI
+                      ? 'The words were written by a model. The artwork was made here.'
+                      : 'Made here on this machine, not by a model.'}
+                  </p>
+
+                  {made.meta.poster && (
+                    <img
+                      src={assetUrl(made.asset.id)}
+                      alt={made.meta.poster.alt}
+                      style={{ maxWidth: '100%', borderRadius: 8, display: 'block', margin: '12px 0' }}
+                    />
+                  )}
+
+                  {made.meta.copy && (
+                    <div className="card" style={{ marginTop: 12 }}>
+                      <p style={{ marginTop: 0 }}>{made.meta.copy.hook}</p>
+                      <p>{made.meta.copy.body}</p>
+                      <p>{made.meta.copy.cta}</p>
+                      {made.meta.copy.hashtags.length > 0 && <p className="help">{made.meta.copy.hashtags.join(' ')}</p>}
+                    </div>
+                  )}
+
+                  {made.meta.storyboard && (
+                    <ol className="shot-list">
+                      {made.meta.storyboard.shots.map((shot) => (
+                        <li key={shot.order}>
+                          <strong>{shot.shot}</strong> ({shot.durationSeconds}s) — {shot.onScreen}
+                          <br />
+                          <span className="help">{shot.voiceover}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  {made.meta.audio && (
+                    <ol className="shot-list">
+                      {made.meta.audio.segments.map((segment) => (
+                        <li key={segment.at}>
+                          <span className="help">{segment.at}s</span> {segment.text}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+
+                  <div className="row" style={{ marginTop: 12 }}>
+                    <button className="ghost" onClick={() => navigate('/library')}>
+                      Open your library
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {validation && (
                 <div style={{ marginTop: 16 }}>

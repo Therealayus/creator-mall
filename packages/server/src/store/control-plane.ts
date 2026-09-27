@@ -172,7 +172,12 @@ export class ControlPlane {
    */
   readonly preferences = createPreferenceStore()
 
-  /** accountId → creator profile id. One profile per account, by design. */
+  /**
+   * accountId → creator profile id. One profile per account, by design.
+   *
+   * Persisted with the rest of the state: without it, a signed-in creator has
+   * no profile after a restart and every creator route 404s.
+   */
   readonly profileAccountLinks = new Map<string, string>()
 
   listAccounts(): CreatorAccount[] {
@@ -348,6 +353,10 @@ export class ControlPlane {
       observations: [...this.preferences.observations.values()].flat(),
       preferences: [...this.preferences.preferences.values()],
       preferenceCounters: this.preferences.counters,
+      profileAccountLinks: [...this.profileAccountLinks.entries()].map(([accountId, profileId]) => ({
+        accountId,
+        profileId,
+      })),
     }
   }
 
@@ -357,6 +366,7 @@ export class ControlPlane {
     for (const snapshot of state.snapshots) this.addSnapshot(snapshot)
     for (const event of state.events) this.addEvent(event)
     for (const proposal of state.proposals) this.addProposal(proposal)
+    for (const link of state.profileAccountLinks ?? []) this.linkProfileToAccount(link.accountId, link.profileId)
     for (const creator of state.creators) this.creators.set(creator.id, creator)
     for (const account of state.accounts ?? []) this.accounts.set(account.id, account)
     for (const session of state.sessions ?? []) this.sessions.set(session.id, session)
