@@ -319,3 +319,58 @@ describe('rate limiter: internal safeguards', () => {
     assert.equal(limiter.size(), 0)
   })
 })
+
+describe('SEC: lockout can be cleared by time, not only by success', () => {
+  it('starts counting again once the lock has expired', async () => {
+    const { createContext } = await import('../src/context.js')
+    const context = await testContext({}, { ALLOW_UNAUTHENTICATED_ADMIN: true })
+    void context
+
+    // A locked account whose lock has run out must not stay locked forever.
+    const fresh = await createContext(
+      { DATA_DIR: '', ALLOW_UNAUTHENTICATED_ADMIN: true },
+      { persistence: { load: async () => null, save: async () => undefined } },
+    )
+    const account = {
+      id: 'acc_locked',
+      email: 'locked@example.com',
+      passwordHash: 'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAA',
+      displayName: 'Locked',
+      role: 'CREATOR' as const,
+      status: 'ACTIVE' as const,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastLoginAt: null,
+      consecutiveFailures: 99,
+      lockedUntil: '2020-01-01T00:00:00.000Z',
+    }
+    fresh.control.upsertAccount(account)
+
+    const server = await startServer(fresh)
+    try {
+      const first = await server.get('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'locked@example.com', password: 'wrong' }),
+      })
+      // 401, not 429: the lock expired, so this is a fresh failure.
+      assert.equal(first.status, 401, 'an expired lock must not keep refusing with 429')
+      const after = fresh.control.getAccountByEmail('locked@example.com')
+      assert.equal(after?.consecutiveFailures, 1, 'the counter restarts from zero after an expired lock')
+    } finally {
+      await server.close()
+    }
+  })
+})
+
+describe('AI: a stalled provider response cannot hang the caller', () => {
+  it('gives up on a body that never arrives', async () => {
+    const { OpenRouterClient } = await import('../src/ai/openrouter.js')
+    const client = new OpenRouterClient(
+      { apiKey: 'k', model: 'm', baseUrl: 'https://example.invalid', timeoutMs: 60 },
+      // Headers arrive; the body never does. The old code only bounded the
+      // headers, so this hung forever.
+      (async () => new Response(new ReadableStream({ start() { /* never enqueues */ } }), { status: 200 })) as typeof fetch,
+    )
+    await assert.rejects(() => client.complete({ system: 's', user: 'u', maxTokens: 10 }))
+  })
+})

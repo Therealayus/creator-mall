@@ -273,5 +273,8 @@ export function passwordProblems(password: string): string[] {
 export const PUBLIC_PATHS: ReadonlyArray<string> = ['/reset-password', '/verify-email']
 
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.includes(pathname)
+  // A trailing slash must not make account recovery unreachable again, which is
+  // exactly what an exact string match did.
+  const normalized = pathname.replace(/\/+$/, '')
+  return PUBLIC_PATHS.includes(normalized)
 }

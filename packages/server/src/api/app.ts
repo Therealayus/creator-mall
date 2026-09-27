@@ -514,15 +514,21 @@ const decisionSchema = z.object({
     })()
   })
 
-  app.delete('/api/creator/assets/:assetId', (request, response) => {
+  app.delete('/api/creator/assets/:assetId', (request, response, next) => {
     void (async () => {
-      const creator = currentProfile(context, request)
-      const asset = context.media.get(request.params.assetId ?? '')
-      if (!creator || !asset) return response.status(404).json({ error: 'unknown asset' })
-      if (asset.creatorId !== creator.id) return response.status(403).json({ error: 'That is not your asset.' })
-      await context.media.remove(asset.id)
-      await context.persist()
-      return response.json({ removed: true })
+      try {
+        const creator = currentProfile(context, request)
+        const asset = context.media.get(request.params.assetId ?? '')
+        if (!creator || !asset) return response.status(404).json({ error: 'unknown asset' })
+        if (asset.creatorId !== creator.id) return response.status(403).json({ error: 'That is not your asset.' })
+        await context.media.remove(asset.id)
+        await context.persist()
+        return response.json({ removed: true })
+      } catch (error) {
+        // Without this, a failing remove() or persist() rejects after the
+        // response and becomes an unhandled rejection, which terminates Node.
+        return next(error)
+      }
     })()
   })
 

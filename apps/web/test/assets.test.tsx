@@ -114,12 +114,14 @@ function render(node: ReactNode, path: string): string {
 
 describe('the library page', () => {
   it('renders without a browser or data', () => {
-    // The list arrives after mount, so the first paint is the empty state and
-    // it must still be a real page rather than a crash.
+    // The list arrives after mount, so the first paint is a loading state and
+    // it must say so. It used to claim the library was empty, which made a slow
+    // load indistinguishable from a creator with nothing.
     const html = render(<AssetsPage />, '/library')
     assert.match(html, /Your library/)
     assert.match(html, /Add a file/)
-    assert.match(html, /Nothing here yet/)
+    assert.match(html, /Loading your library/)
+    assert.equal(/Nothing here yet/.test(html), false, 'a loading library is not an empty one')
   })
 
   it('offers a filter for each kind it can show', () => {

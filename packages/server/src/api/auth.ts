@@ -280,9 +280,17 @@ export function authRoutes(context: AppContext): Router {
 
       const ok = await verifyPassword(parsed.data.password, account.passwordHash)
       if (!ok) {
-        const failures = account.consecutiveFailures + 1
+        // The counter is re-read here so concurrent attempts cannot increment
+        // the same stale value and undercount. It only resets when a lock has
+        // actually run its course; with no lock the tally carries on.
+        const fresh = context.control.getAccountByEmail(email) ?? account
+        const lockRanOut = Boolean(
+          fresh.lockedUntil && new Date(fresh.lockedUntil).getTime() <= Date.now(),
+        )
+        const priorFailures = lockRanOut ? 0 : fresh.consecutiveFailures
+        const failures = priorFailures + 1
         context.control.upsertAccount({
-          ...account,
+          ...fresh,
           consecutiveFailures: failures,
           lockedUntil: failures >= MAX_FAILURES ? new Date(Date.now() + LOCK_MS).toISOString() : null,
         })
@@ -376,24 +384,33 @@ export function authRoutes(context: AppContext): Router {
         response.status(result.status).json({ error: result.error })
         return
       }
+      // The new hash and the revoked sessions only exist in memory until this.
+      await context.persist()
       response.json({ ok: true, message: 'Your password has been changed. Sign in with it.' })
     })().catch(() => {
       response.status(500).json({ error: 'Could not change the password just now.' })
     })
   })
 
-  router.post('/verify-email', (request, response) => {
-    const parsed = z.object({ token: z.string().min(10).max(400) }).safeParse(request.body ?? {})
-    if (!parsed.success) {
-      response.status(400).json({ error: 'That confirmation link is not valid any more.' })
-      return
-    }
-    const result = confirmEmailVerification(context, parsed.data.token)
-    if (!result.ok) {
-      response.status(result.status).json({ error: result.error })
-      return
-    }
-    response.json({ ok: true, message: 'Thanks, your email address is confirmed.' })
+  router.post('/verify-email', (request, response, next) => {
+    void (async () => {
+      try {
+        const parsed = z.object({ token: z.string().min(10).max(400) }).safeParse(request.body ?? {})
+        if (!parsed.success) {
+          response.status(400).json({ error: 'That confirmation link is not valid any more.' })
+          return
+        }
+        const result = confirmEmailVerification(context, parsed.data.token)
+        if (!result.ok) {
+          response.status(result.status).json({ error: result.error })
+          return
+        }
+        await context.persist()
+        response.json({ ok: true, message: 'Thanks, your email address is confirmed.' })
+      } catch (error) {
+        next(error)
+      }
+    })()
   })
 
   return router

@@ -59,6 +59,11 @@ export function PersonalisationPage(props: { authedFetch: <T>(path: string, init
       <div className="page-head">
         <h1>What we've learned</h1>
         <div className="notice stop">{error}</div>
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="ghost" onClick={() => void load()}>
+            Try again
+          </button>
+        </div>
       </div>
     )
   }

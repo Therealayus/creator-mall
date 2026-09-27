@@ -45,28 +45,43 @@ export class OpenRouterClient implements ModelClient {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs)
 
+    // The signal bounds the socket, but a DNS lookup that never resolves can
+    // outlive it, and `clearTimeout` around the headers alone left the body read
+    // unbounded. A deadline promise bounds the whole call either way.
+    let expired: NodeJS.Timeout | undefined
+    const deadline = new Promise<never>((_resolve, reject) => {
+      expired = setTimeout(() => {
+        controller.abort()
+        reject(new ProviderError(`model call timed out after ${this.config.timeoutMs}ms`))
+      }, this.config.timeoutMs)
+    })
+
     let response: Response
     try {
-      response = await this.fetchImpl(`${this.config.baseUrl}/chat/completions`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          authorization: `Bearer ${this.config.apiKey}`,
-          'content-type': 'application/json',
-          ...(this.config.referer ? { 'http-referer': this.config.referer } : {}),
-          ...(this.config.title ? { 'x-title': this.config.title } : {}),
-        },
-        body: JSON.stringify({
-          model: this.config.model,
-          temperature: 0,
-          max_tokens: input.maxTokens,
-          messages: [
-            { role: 'system', content: input.system },
-            { role: 'user', content: input.user },
-          ],
+      response = await Promise.race([
+        this.fetchImpl(`${this.config.baseUrl}/chat/completions`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            authorization: `Bearer ${this.config.apiKey}`,
+            'content-type': 'application/json',
+            ...(this.config.referer ? { 'http-referer': this.config.referer } : {}),
+            ...(this.config.title ? { 'x-title': this.config.title } : {}),
+          },
+          body: JSON.stringify({
+            model: this.config.model,
+            temperature: 0,
+            max_tokens: input.maxTokens,
+            messages: [
+              { role: 'system', content: input.system },
+              { role: 'user', content: input.user },
+            ],
+          }),
         }),
-      })
+        deadline,
+      ])
     } catch (error) {
+      if (error instanceof ProviderError) throw error
       throw new ProviderError(
         error instanceof Error && error.name === 'AbortError'
           ? `model call timed out after ${this.config.timeoutMs}ms`
@@ -74,6 +89,7 @@ export class OpenRouterClient implements ModelClient {
       )
     } finally {
       clearTimeout(timer)
+      clearTimeout(expired)
     }
 
     if (!response.ok) {
@@ -81,9 +97,23 @@ export class OpenRouterClient implements ModelClient {
       throw new ProviderError(`model call returned http ${response.status}`, response.status)
     }
 
-    const payload: unknown = await response.json().catch(() => null)
+    // The body is read under the same deadline: a provider that sends headers
+    // and then stalls must not hold the caller open forever.
+    let payload: unknown
+    try {
+      payload = await Promise.race([response.json().catch(() => null), deadlineFor(this.config.timeoutMs)])
+    } catch (error) {
+      if (error instanceof ProviderError) throw error
+      throw new ProviderError('model response could not be read')
+    }
     return readContent(payload)
   }
+}
+
+function deadlineFor(timeoutMs: number): Promise<never> {
+  return new Promise<never>((_resolve, reject) => {
+    setTimeout(() => reject(new ProviderError(`model call timed out after ${timeoutMs}ms`)), timeoutMs).unref()
+  })
 }
 
 function readContent(payload: unknown): string {

@@ -1,5 +1,6 @@
 import { createContext } from './context.js'
 import { createApp } from './api/app.js'
+import { limiterFor } from './api/auth.js'
 import { ResearchScheduler } from './world-engine/scheduler.js'
 
 /**
@@ -67,6 +68,25 @@ async function main(): Promise<void> {
     console.error('[creator-mall] uncaught exception', error)
     shutdown('uncaughtException')
   })
+
+  /**
+   * Housekeeping.
+   *
+   * Sessions and rate-limit windows are keyed by something the process does not
+   * control, and both have a prune method that nothing was calling. Without this
+   * tick both grow for the lifetime of the process.
+   */
+  const housekeeping = setInterval(() => {
+    const sessions = context.control.pruneSessions()
+    const windows = limiterFor(context).prune({
+      bucket: '',
+      windowMs: context.config.AUTH_RATE_WINDOW_MS,
+    })
+    if (sessions > 0 || windows > 0) {
+      console.log(`[creator-mall] housekeeping: pruned ${sessions} sessions, ${windows} rate-limit windows`)
+    }
+  }, 10 * 60_000)
+  housekeeping.unref()
 }
 
 main().catch((error: unknown) => {

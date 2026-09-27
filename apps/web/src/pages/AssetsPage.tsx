@@ -15,6 +15,7 @@ export function AssetsPage(): ReactNode {
   const [assets, setAssets] = useState<AssetSummary[]>([])
   const [filter, setFilter] = useState<AssetKind | ''>('')
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -25,6 +26,10 @@ export function AssetsPage(): ReactNode {
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load your library just now')
+    } finally {
+      // Without this the first paint says "Nothing here yet" while the request
+      // is still in flight, and an empty library looks like a slow one.
+      setLoading(false)
     }
   }
 
@@ -100,7 +105,9 @@ export function AssetsPage(): ReactNode {
         </div>
       </div>
 
-      {assets.length === 0 ? (
+      {loading ? (
+        <p className="empty">Loading your library…</p>
+      ) : assets.length === 0 && !error ? (
         <p className="empty">
           Nothing here yet. Generate something from Create, or add a file you already have.
         </p>

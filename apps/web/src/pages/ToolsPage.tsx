@@ -15,18 +15,18 @@ export function ToolsPage(): ReactNode {
   const [data, setData] = useState<CreatorToolsResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  function reload(): void {
+    setError(null)
+    setData(null)
+    void fetchTools()
+      .then((result) => setData(result))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Could not load tools just now'))
+  }
+
   useEffect(() => {
-    let live = true
-    fetchTools()
-      .then((result) => {
-        if (live) setData(result)
-      })
-      .catch((cause: unknown) => {
-        if (live) setError(cause instanceof Error ? cause.message : 'Could not load tools just now')
-      })
-    return () => {
-      live = false
-    }
+    void fetchTools()
+      .then((result) => setData(result))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Could not load tools just now'))
   }, [])
 
   const grouped = useMemo(() => groupByPlatform(data?.tools ?? []), [data])
@@ -36,6 +36,11 @@ export function ToolsPage(): ReactNode {
       <div className="page-head">
         <h1>Tools</h1>
         <div className="notice stop">{error}</div>
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="ghost" onClick={() => void reload()}>
+            Try again
+          </button>
+        </div>
       </div>
     )
   }
