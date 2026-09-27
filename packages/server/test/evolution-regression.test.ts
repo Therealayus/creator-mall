@@ -142,8 +142,13 @@ describe('evolution: activation needs evidence', () => {
     const { context, event } = await changedWorld()
     const draft = draftsFor(context, event)[0]!
 
-    // Stand in for a generator that produces something acceptable.
-    const stub = { complete: async () => 'A caption about batching a week of filming, written plainly for creators.' }
+    // The generator has to actually honour the verified change. The old stub
+    // ignored it and the run still passed, which is exactly the hole this
+    // assertion is now there to close.
+    const stub = {
+      complete: async () =>
+        'Keep it to 15 seconds and here is why that length holds attention while you film a week of content in one go.',
+    }
     const original = context.modelClient
     ;(context as { modelClient: unknown }).modelClient = stub
 

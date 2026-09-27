@@ -218,14 +218,19 @@ export function buildRegressionCases(input: {
   }
 
   for (const requirement of input.requirements) {
-    const forbidden = requirementForbids(requirement) ? forbiddenTerm(requirement) : null
+    const forbidden = forbiddenTerm(requirement)
+    // A requirement that names something to avoid gets mustNotInclude. A
+    // requirement that states a new fact gets mustInclude, so the runner
+    // actually asserts the requirement rather than only counting characters —
+    // otherwise "always answer in French" or "invent statistics" would pass and
+    // a draft built on it would be allowed to go live.
+    const required = requiredTerm(requirement)
     cases.push({
       id: stableId('case', input.brief, 'requirement', requirement),
       expectation: `Handles the new requirement: ${requirement}`,
       brief: input.brief,
-      // A requirement that names a platform term should show up in the output;
-      // one that forbids something should keep it out.
       ...(forbidden ? { mustNotInclude: [forbidden] } : {}),
+      ...(required ? { mustInclude: [required] } : {}),
       // And it still has to be a real post. Without this a case could assert
       // nothing at all, and a case that asserts nothing always passes.
       minCharacters: 40,
@@ -245,13 +250,51 @@ export function buildRegressionCases(input: {
   return cases
 }
 
-function requirementForbids(requirement: string): boolean {
-  return /\b(never|do not|don't|avoid|no )\b/i.test(requirement)
+/**
+ * The thing a requirement forbids, if it forbids one.
+ *
+ * "Never invent earnings figures", "Do not mention the old format" and
+ * "Never mention limits.video.maxDurationSeconds" all name something. The
+ * previous pattern only matched "invent/make up/fabricate", so every real
+ * requirement produced an empty constraint and the case degraded to a length
+ * check.
+ */
+export function forbiddenTerm(requirement: string): string | null {
+  const match =
+    /\b(?:never|do not|don't|avoid)\s+(?:invent(?:ing|ed)?|making up|fabricat(?:e|ing)|mention(?:ing)?|stat(?:ing|e)|guess(?:ing)?)\s+([A-Za-z0-9_.-]+(?:\s+[A-Za-z0-9_.-]+){0,2})/i.exec(
+      requirement,
+    )
+  return cleanTerm(match?.[1] ?? null)
 }
 
-function forbiddenTerm(requirement: string): string | null {
-  const match = /\b(?:never|do not|don't|avoid)\s+(?:invent(?:ing|ed)?|making up|fabricating)\s+([^.,;]+)/i.exec(requirement)
-  return match?.[1]?.trim() ?? null
+/**
+ * The thing a requirement introduces, if it states one.
+ *
+ * "Adapt to the change at limits.video.maxDurationSeconds: it is now 15" has to
+ * produce output that mentions 15, otherwise nothing verifies that the draft
+ * actually adopted the new requirement.
+ */
+export function requiredTerm(requirement: string): string | null {
+  if (/\b(?:never|do not|don't|avoid)\b/i.test(requirement)) return null
+  const stated = /(?:is now|now|becomes|changed to|set to)\s+([0-9][0-9.,_]*\s*[a-z%]*)/i.exec(requirement)
+  if (stated) return cleanTerm(stated[1] ?? null)
+  const path = /at\s+([a-z0-9_.]+)/i.exec(requirement)
+  if (!path) return null
+  // "limits.video.maxDurationSeconds" -> "duration", the human part of the name.
+  const leaf = (path[1] ?? '').split('.').pop() ?? ''
+  const words = leaf.replace(/([a-z])([A-Z])/g, '$1 $2').split(/[_\s]+/).filter(Boolean)
+  return cleanTerm(words.join(' '))
+}
+
+function cleanTerm(value: string | null): string | null {
+  if (!value) return null
+  // Cut at the first dot that ends a sentence. A dot inside an identifier is
+  // kept, so "limits.video.maxDurationSeconds." survives whole while
+  // "earnings figures. Only state..." stops at "earnings figures".
+  const firstSentence = value.split(/\.(?:\s|$)/)[0] ?? value
+  const trimmed = firstSentence.trim().replace(/^["'`]|["'`]$/g, '').replace(/[.,;]+$/, '')
+  if (trimmed.length < 2) return null
+  return trimmed
 }
 
 /** Records a run against the prompt version it tested. */

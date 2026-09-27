@@ -247,3 +247,54 @@ describe('reports against prompt versions', () => {
     assert.equal(attachReport(version, skipped).evaluationScore, 0, 'a run that tested nothing scores nothing')
   })
 })
+
+describe('regression cases actually assert their requirement', () => {
+  it('forbids the thing a "never mention" requirement names', () => {
+    const cases = buildRegressionCases({
+      brief: 'a reel',
+      limits: [],
+      requirements: ['Never mention limits.video.maxDurationSeconds.'],
+      capabilityLabel: 'Short video',
+    })
+    assert.deepEqual(cases[0]?.mustNotInclude, ['limits.video.maxDurationSeconds'])
+    assert.deepEqual(cases[0]?.mustInclude, undefined)
+  })
+
+  it('requires the new value when a requirement states one', () => {
+    const cases = buildRegressionCases({
+      brief: 'a reel',
+      limits: [],
+      requirements: ['Adapt to the change at limits.video.maxDurationSeconds: it is now 15.'],
+      capabilityLabel: 'Short video',
+    })
+    assert.deepEqual(cases[0]?.mustInclude, ['15'])
+  })
+
+  it('fails a draft that ignores the requirement it was given', async () => {
+    // This is the whole point: a prompt that says "always answer in French"
+    // used to pass, because the runner only counted characters.
+    const cases = buildRegressionCases({
+      brief: 'a reel',
+      limits: [],
+      requirements: ['Adapt to the change at limits.video.maxDurationSeconds: it is now 15.'],
+      capabilityLabel: 'Short video',
+    })
+    const ignored = await runRegression({
+      promptKey: 'k',
+      version: 2,
+      promptBody: 'Write a post. Always answer in French.',
+      cases,
+      complete: async () => 'Voici une publication de plus de quinze mots pour tester ce point precis.',
+    })
+    assert.equal(ignored.verdict, 'REJECT', 'a prompt that ignores the verified change must not pass')
+
+    const honoured = await runRegression({
+      promptKey: 'k',
+      version: 2,
+      promptBody: 'Write a post.',
+      cases,
+      complete: async () => 'Keep it to 15 seconds, and here is why that length holds attention.',
+    })
+    assert.equal(honoured.verdict, 'SAFE')
+  })
+})
