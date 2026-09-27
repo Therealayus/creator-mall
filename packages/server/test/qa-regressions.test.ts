@@ -374,3 +374,112 @@ describe('AI: a stalled provider response cannot hang the caller', () => {
     await assert.rejects(() => client.complete({ system: 's', user: 'u', maxTokens: 10 }))
   })
 })
+describe('SCALE: history is bounded and lists are paginated', () => {
+  it('keeps only the newest snapshots per platform', async () => {
+    const { ControlPlane, MAX_SNAPSHOTS_PER_PLATFORM } = await import('../src/store/control-plane.js')
+    const control = new ControlPlane()
+    const platform = { id: 'p1', slug: 'thing', name: 'Thing' } as never
+
+    for (let index = 0; index < MAX_SNAPSHOTS_PER_PLATFORM + 50; index += 1) {
+      control.addSnapshot({
+        id: `s${index}`,
+        platformId: 'p1',
+        capturedAt: new Date(1_700_000_000_000 + index * 1000).toISOString(),
+        stateHash: `h${index}`,
+        state: { capabilities: {}, limits: {}, mediaSpecs: {}, publishing: {}, api: {}, analytics: {}, monetization: {}, requirements: {} },
+      } as never)
+      void platform
+    }
+
+    const kept = control.snapshotsFor('p1')
+    assert.equal(kept.length, MAX_SNAPSHOTS_PER_PLATFORM, 'the snapshot log must not grow without bound')
+    assert.equal(kept.at(-1)?.id, `s${MAX_SNAPSHOTS_PER_PLATFORM + 49}`, 'and the newest are the ones kept')
+  })
+
+  it('never drops a change that still needs a decision', async () => {
+    const { ControlPlane } = await import('../src/store/control-plane.js')
+    const control = new ControlPlane()
+    const base = {
+      platformId: 'p1',
+      eventType: 'LIMIT_CHANGE',
+      category: 'LIMIT_CHANGE',
+      title: 't',
+      creatorSummary: 's',
+      detectedAt: '',
+      verifiedAt: null,
+      sourceIds: [],
+      trustLevel: 'OFFICIAL',
+      confidence: 1,
+      previousState: null,
+      newState: null,
+      deltas: [],
+      impact: '',
+      affectedCapabilityKeys: [],
+      affectedComponents: [],
+      riskLevel: 'LOW',
+      approvedBy: null,
+      deployedAt: null,
+    } as never
+
+    // An old event nobody has judged yet.
+    control.addEvent({ ...(base as object), id: 'pending', detectedAt: '2020-01-01T00:00:00.000Z', status: 'DETECTED' } as never)
+    for (let index = 0; index < 250; index += 1) {
+      control.addEvent({
+        ...(base as object),
+        id: `e${index}`,
+        detectedAt: new Date(1_700_000_000_000 + index * 1000).toISOString(),
+        status: 'APPLIED',
+      } as never)
+    }
+
+    const remaining = control.listEvents({ platformId: 'p1' })
+    assert.equal(
+      remaining.some((event) => event.id === 'pending'),
+      true,
+      'an unjudged change must survive retention, or it is lost rather than resolved',
+    )
+  })
+
+  it('caps a list endpoint so it cannot return the whole database', async () => {
+    const context = await testContext({}, { ALLOW_UNAUTHENTICATED_ADMIN: true })
+    const server = await startServer(context)
+    try {
+      const base = {
+        platformId: null,
+        eventType: 'LIMIT_CHANGE',
+        category: 'LIMIT_CHANGE',
+        title: 't',
+        creatorSummary: 's',
+        detectedAt: new Date(1_700_000_000_000).toISOString(),
+        verifiedAt: null,
+        sourceIds: [],
+        trustLevel: 'OFFICIAL',
+        confidence: 1,
+        previousState: null,
+        newState: null,
+        deltas: [],
+        impact: '',
+        affectedCapabilityKeys: [],
+        affectedComponents: [],
+        riskLevel: 'LOW',
+        approvedBy: null,
+        deployedAt: null,
+        status: 'APPLIED',
+      } as never
+      for (let index = 0; index < 400; index += 1) {
+        context.control.addEvent({ ...(base as object), id: `x${index}` } as never)
+      }
+
+      const unbounded = JSON.parse((await server.get('/api/evolution/events')).body) as { events: unknown[] }
+      assert.equal(unbounded.events.length <= 200, true, 'the default page must be bounded')
+
+      const asked = JSON.parse((await server.get('/api/evolution/events?limit=5000')).body) as { events: unknown[] }
+      assert.equal(asked.events.length <= 200, true, 'a caller cannot ask for more than the cap')
+
+      const small = JSON.parse((await server.get('/api/evolution/events?limit=5')).body) as { events: unknown[] }
+      assert.equal(small.events.length, 5, 'and a small page is honoured')
+    } finally {
+      await server.close()
+    }
+  })
+})

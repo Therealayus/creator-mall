@@ -167,12 +167,14 @@ export function createApp(context: AppContext): Express {
 
   app.get('/api/evolution/events', (request, response) => {
     const platformId = request.query.platform ? queryString(request.query.platform) : undefined
-    response.json({ events: context.control.listEvents(platformId ? { platformId } : {}) })
+    response.json({ events: context.control.listEvents({ ...(platformId ? { platformId } : {}), limit: pageLimit(request) }) })
   })
 
   app.get('/api/evolution/proposals', (request, response) => {
     const status = request.query.status ? queryString(request.query.status) : undefined
-    response.json({ proposals: context.control.listProposals(status ? { status } : {}) })
+    response.json({
+      proposals: context.control.listProposals(status ? { status } : {}).slice(0, pageLimit(request)),
+    })
   })
 
   const activationSchema = z.object({
@@ -752,6 +754,16 @@ function mountWebApp(app: Express): void {
 function currentProfile(context: AppContext, request: Request) {
   if (request.account) return context.control.profileForAccount(request.account.id)
   return context.creatorSession()
+}
+
+/**
+ * Page size for list routes, capped so no request can ask for the whole database
+ * and so a growing collection cannot silently become a huge response.
+ */
+function pageLimit(request: Request, fallback = 50): number {
+  const raw = Number(queryString(request.query.limit))
+  if (!Number.isInteger(raw) || raw < 1) return fallback
+  return Math.min(raw, 200)
 }
 
 /** Express query values are `string | string[] | undefined`; normalise them. */

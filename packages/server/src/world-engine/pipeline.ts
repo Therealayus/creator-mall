@@ -75,6 +75,8 @@ export interface CycleResult extends ResearchJobRun {
   embeddingsRefreshed: number
   /** Prompt versions and templates drafted from verified changes. */
   draftsCreated: number
+  /** History records dropped by retention this cycle. */
+  recordsPruned?: number
 }
 
 /**
@@ -259,6 +261,11 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     embeddingsRefreshed: embedding.embedded,
     events: createdEvents,
   }
+  // Trim history before it is written, so a long-lived process does not carry
+  // an unbounded snapshot log in every save.
+  const pruned = control.pruneHistory()
+  if (pruned > 0) result.recordsPruned = pruned
+
   control.addJobRun(result)
   // The caller decides how this survives a restart. Nothing else will.
   if (onCycleComplete) await onCycleComplete(result)

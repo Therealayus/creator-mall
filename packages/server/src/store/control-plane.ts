@@ -35,6 +35,16 @@ import type { ControlPlaneState } from './persistence.js'
  * Engine read or write lives here. Deliberately framework-free so the engines
  * can be tested without HTTP and the API can be tested without a scheduler.
  */
+/**
+ * Retention bounds.
+ *
+ * A research cycle writes one snapshot per platform per run. At the default
+ * 15 minute cadence that is 28 rows an hour, so an unbounded list becomes the
+ * fastest-growing thing in a system that rewrites its whole state on every save.
+ */
+export const MAX_SNAPSHOTS_PER_PLATFORM = 200
+export const MAX_EVENTS_PER_PLATFORM = 200
+
 export class ControlPlane {
   readonly capabilities = new CapabilityRegistry()
   readonly graph = new DependencyGraph()
@@ -98,8 +108,47 @@ export class ControlPlane {
     const list = this.snapshots.get(snapshot.platformId) ?? []
     list.push(snapshot)
     list.sort((a, b) => a.capturedAt.localeCompare(b.capturedAt))
+    // Retention. A research cycle appends a snapshot per platform every run, so
+    // without a bound this is the collection that grows fastest in the system —
+    // and the whole state is rewritten on every save.
+    if (list.length > MAX_SNAPSHOTS_PER_PLATFORM) {
+      list.splice(0, list.length - MAX_SNAPSHOTS_PER_PLATFORM)
+    }
     this.snapshots.set(snapshot.platformId, list)
     return snapshot
+  }
+
+  /**
+   * Trims history that is only useful for looking back a short way.
+   *
+   * Knowledge documents keep their full version history, which is the point of
+   * them; snapshots and events are observations over time, and past a window they
+   * stop informing anything. Returns how many records were dropped so a cycle can
+   * report it.
+   */
+  pruneHistory(options: { maxSnapshotsPerPlatform?: number; maxEventsPerPlatform?: number } = {}): number {
+    const maxSnapshots = options.maxSnapshotsPerPlatform ?? MAX_SNAPSHOTS_PER_PLATFORM
+    const maxEvents = options.maxEventsPerPlatform ?? MAX_EVENTS_PER_PLATFORM
+    let removed = 0
+
+    for (const [platformId, list] of this.snapshots) {
+      if (list.length <= maxSnapshots) continue
+      removed += list.length - maxSnapshots
+      this.snapshots.set(platformId, list.slice(list.length - maxSnapshots))
+    }
+
+    for (const [platformId, list] of this.events) {
+      if (list.length <= maxEvents) continue
+      // Keep the newest, but keep anything still awaiting a decision: a detected
+      // change that nobody has judged yet is still live work, and dropping it
+      // would silently lose it rather than resolve it.
+      const sorted = [...list].sort((a, b) => b.detectedAt.localeCompare(a.detectedAt))
+      const keep = sorted.filter((event, index) => index < maxEvents || event.status === 'DETECTED')
+      removed += list.length - keep.length
+      this.events.set(platformId, keep)
+    }
+
+    return removed
   }
 
   snapshotsFor(platformId: string): PlatformSnapshot[] {
@@ -120,12 +169,15 @@ export class ControlPlane {
     return event
   }
 
-  listEvents(filter: { platformId?: string; status?: string } = {}): EvolutionEvent[] {
+  listEvents(filter: { platformId?: string; status?: string; limit?: number } = {}): EvolutionEvent[] {
     const all = [...this.events.values()].flat()
-    return all
+    const matched = all
       .filter((event) => (filter.platformId ? event.platformId === filter.platformId : true))
       .filter((event) => (filter.status ? event.status === filter.status : true))
       .sort((a, b) => b.detectedAt.localeCompare(a.detectedAt))
+    // Callers that do not ask for everything get a bounded slice, so one route
+    // cannot return an entire year of history in a single response body.
+    return filter.limit ? matched.slice(0, filter.limit) : matched
   }
 
   getEvent(id: string): EvolutionEvent | undefined {
