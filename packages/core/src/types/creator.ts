@@ -16,12 +16,22 @@ export interface CreatorProfile {
   createdAt: string
 }
 
+/**
+ * A preference the system believes, with the evidence that produced it.
+ *
+ * Every field here exists so the creator can answer "why am I seeing this?",
+ * forget one preference, or reset all of them (§31). Nothing learned here ever
+ * changes what is published or grants access.
+ */
 export interface LearnedPreference {
   id: string
   creatorId: string
   key: string
   value: string
-  /** Why the system believes this, shown in the "why am I seeing this?" view. */
+  /** Creator-facing name, e.g. "Opening line style". */
+  label: string
+  description: string
+  /** The behaviour that led here, in plain language. */
   evidence: string[]
   confidence: number
   learnedAt: string

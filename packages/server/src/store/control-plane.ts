@@ -3,6 +3,7 @@ import {
   DependencyGraph,
   PromptLibrary,
   createKnowledgeStore,
+  createPreferenceStore,
   isExpired,
   isRevoked,
   isSessionExpired,
@@ -164,6 +165,12 @@ export class ControlPlane {
    */
   private readonly accounts = new Map<string, CreatorAccount>()
   private readonly sessions = new Map<string, Session>()
+
+  /**
+   * What each creator has actually done, and what the system believes about it.
+   * Stored so a restart does not erase the evidence behind a recommendation.
+   */
+  readonly preferences = createPreferenceStore()
 
   /** accountId → creator profile id. One profile per account, by design. */
   readonly profileAccountLinks = new Map<string, string>()

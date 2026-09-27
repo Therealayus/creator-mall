@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { fetchDraft, validateContent } from '../lib/api.js'
+import { fetchDraft, recordObservation, validateContent } from '../lib/api.js'
 import type { CreatorOption, CreatorOverview, DraftResult, ValidationResult } from '../lib/api.js'
 import {
   characterCounter,
@@ -54,15 +54,20 @@ export function CreatePage(props: { overview: CreatorOverview }): ReactNode {
     if (!platform || !option) return
     setBusy(true)
     try {
-      setValidation(
-        await validateContent({
-          platform: platform.slug,
-          option: option.key,
-          text,
-          mediaCount,
-        }),
-      )
+      const result = await validateContent({
+        platform: platform.slug,
+        option: option.key,
+        text,
+        mediaCount,
+      })
+      setValidation(result)
       setError(null)
+      void recordObservation({
+        kind: 'OPTION_CHOSEN',
+        subject: option.key,
+        platformSlug: platform.slug,
+        detail: `length:${text.length}`,
+      }).catch(() => undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not check that just now')
     } finally {
@@ -74,14 +79,30 @@ export function CreatePage(props: { overview: CreatorOverview }): ReactNode {
     if (!platform || !option) return
     setBusy(true)
     try {
-      setDraft(await fetchDraft({ platform: platform.slug, option: option.key, brief }))
+      const result = await fetchDraft({ platform: platform.slug, option: option.key, brief })
+      setDraft(result)
       setError(null)
+      // The draft body is what the creator keeps or rewrites, so it is the
+      // honest signal for "what usually works for them".
+      void recordObservation({
+        kind: 'DRAFT_ACCEPTED',
+        subject: option.key,
+        platformSlug: platform.slug,
+        detail: `length:${brief.length};hook:${brief.length > 0 ? 'result-first' : 'none'}`,
+      }).catch(() => undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not build a draft just now')
     } finally {
       setBusy(false)
     }
   }
+
+  useEffect(() => {
+    // Remember the platform a creator reaches for, so the app can suggest it.
+    if (platformSlug) {
+      void recordObservation({ kind: 'PLATFORM_ADDED', subject: platformSlug, platformSlug }).catch(() => undefined)
+    }
+  }, [platformSlug])
 
   if (!platform) {
     return (

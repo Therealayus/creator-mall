@@ -1,10 +1,18 @@
 import {
   composeDraft,
+  listPreferences,
   limitHintsFor,
+  nowIso,
+  recordObservation,
+  recommendations,
+  stableId,
   watchlistOrder,
 } from '@creator-mall/core'
+import { z } from 'zod'
 import type {
   AdapterValidationIssue,
+  ObservationKind,
+  Recommendation,
   CreatorNotification,
   CreatorProfile,
   JsonValue,
@@ -388,6 +396,90 @@ export function whyForCreator(
     sources,
     pendingReview: proposals.map((proposal) => proposal.title),
   }
+}
+
+// ── Personalisation (§31) ───────────────────────────────────────────────────
+
+export const observationSchema = z.object({
+  kind: z.enum([
+    'OPTION_CHOSEN',
+    'DRAFT_ACCEPTED',
+    'DRAFT_EDITED',
+    'DRAFT_REJECTED',
+    'PLATFORM_ADDED',
+    'PLATFORM_REMOVED',
+    'LIMIT_WARNING_HIT',
+    'UPDATE_OPENED',
+    'UPDATE_DISMISSED',
+  ]),
+  subject: z.string().max(200).default(''),
+  detail: z.string().max(400).nullish(),
+  platformSlug: z.string().max(60).nullish(),
+})
+
+export interface PersonalisationView {
+  /** What the system believes, and why, in the creator's own words. */
+  preferences: Array<{
+    id: string
+    key: string
+    label: string
+    value: string
+    why: string
+    evidence: string[]
+    confidence: number
+    occurrences: number
+    enabled: boolean
+  }>
+  suggestions: Recommendation[]
+  /** Whether anything has been learned at all. */
+  learningAnything: boolean
+  notice: string
+}
+
+const NO_LEARNING_NOTICE =
+  'We only learn from what you do here, and only to suggest defaults. You can turn any of it off, forget it, or reset everything.'
+
+export function personalisationFor(context: AppContext, creatorId: string): PersonalisationView {
+  const store = context.control.preferences
+  const preferences = listPreferences(store, creatorId).map((preference) => ({
+    id: preference.id,
+    key: preference.key,
+    label: preference.label,
+    value: preference.value,
+    why: preference.description,
+    evidence: preference.evidence,
+    confidence: preference.confidence,
+    occurrences: preference.occurrences,
+    enabled: preference.enabled,
+  }))
+
+  const suggestions = recommendations(store, creatorId)
+  return {
+    preferences,
+    suggestions,
+    learningAnything: preferences.length > 0,
+    notice:
+      preferences.length > 0
+        ? 'These are suggestions only. Nothing is published or changed without you.'
+        : NO_LEARNING_NOTICE,
+  }
+}
+
+export function recordCreatorObservation(
+  context: AppContext,
+  creatorId: string,
+  input: { kind: ObservationKind; subject: string; detail?: string | null; platformSlug?: string | null },
+): { learned: number; changed: string[] } {
+  const result = recordObservation(context.control.preferences, {
+    id: stableId('obs', creatorId, input.kind, input.subject, nowIso()),
+    creatorId,
+    kind: input.kind,
+    at: nowIso(),
+    subject: input.subject,
+    detail: input.detail ?? null,
+    platformSlug: input.platformSlug ?? null,
+  })
+  return { learned: result.learned.length, changed: result.changed.map((preference) => preference.key) }
 }
 
 export function stateSummary(state: PlatformState | null): JsonValue {

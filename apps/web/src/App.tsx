@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Route, Routes, useNavigate } from 'react-router-dom'
 import { fetchOverview } from './lib/api.js'
 import type { CreatorOverview } from './lib/api.js'
-import { restoreSession, signOut } from './lib/auth.js'
+import { authedFetch, restoreSession, signOut } from './lib/auth.js'
 import type { AuthResult } from './lib/auth.js'
 import { Shell } from './components/Shell.js'
 import { HomePage } from './pages/HomePage.js'
@@ -12,6 +12,7 @@ import { PlatformPage } from './pages/PlatformPage.js'
 import { UpdatesPage } from './pages/UpdatesPage.js'
 import { ComingSoonPage } from './pages/ComingSoonPage.js'
 import { SignInPage } from './pages/SignInPage.js'
+import { PersonalisationPage } from './pages/PersonalisationPage.js'
 
 type Phase = 'checking' | 'signed-out' | 'loading' | 'ready' | 'error'
 
@@ -94,6 +95,7 @@ export function App(): ReactNode {
         <Route path="/platforms/:platform" element={<PlatformPage overview={overview} />} />
         <Route path="/updates" element={<UpdatesPage overview={overview} />} />
         <Route path="/coming-soon" element={<ComingSoonPage overview={overview} />} />
+        <Route path="/you" element={<PersonalisationPage authedFetch={authedFetch} />} />
         <Route path="*" element={<HomePage overview={overview} />} />
       </Routes>
     </Shell>

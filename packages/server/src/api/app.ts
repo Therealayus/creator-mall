@@ -25,6 +25,8 @@ import {
   whyForCreator,
 } from './creator.js'
 import { attachSession, authRoutes, requireAuth } from './auth.js'
+import { forgetPreference, resetPersonalization, setPreferenceEnabled } from '@creator-mall/core'
+import { observationSchema, personalisationFor, recordCreatorObservation } from './creator.js'
 
 export function createApp(context: AppContext): Express {
   const app = express()
@@ -219,6 +221,66 @@ export function createApp(context: AppContext): Express {
 
   app.get('/api/creator/overview', (request, response) => {
     response.json(creatorOverview(context, currentProfile(context, request)))
+  })
+
+  // ── Personalisation (§31) ───────────────────────────────────────────────
+  // The creator can see what was learned, why, turn one off, forget one, or
+  // reset everything. None of it can publish anything or change access.
+
+  app.get('/api/creator/personalisation', (request, response) => {
+    const creator = currentProfile(context, request)
+    if (!creator || !request.account) return response.status(404).json({ error: 'no creator profile' })
+    return response.json(personalisationFor(context, creator.id))
+  })
+
+  app.post('/api/creator/observations', (request, response, next) => {
+    try {
+      const creator = currentProfile(context, request)
+      if (!creator || !request.account) return response.status(404).json({ error: 'no creator profile' })
+      const body = observationSchema.parse(request.body ?? {})
+      const result = recordCreatorObservation(context, creator.id, {
+        kind: body.kind,
+        subject: body.subject,
+        detail: body.detail ?? null,
+        platformSlug: body.platformSlug ?? null,
+      })
+      return response.json(result)
+    } catch (error) {
+      return next(error)
+    }
+  })
+
+  const preferenceSchema = z.object({ enabled: z.boolean() })
+
+  app.post('/api/creator/preferences/:preferenceId', (request, response, next) => {
+    try {
+      const creator = currentProfile(context, request)
+      if (!creator) return response.status(404).json({ error: 'no creator profile' })
+      const body = preferenceSchema.parse(request.body ?? {})
+      const updated = setPreferenceEnabled(
+        context.control.preferences,
+        request.params.preferenceId ?? '',
+        body.enabled,
+      )
+      if (!updated) return response.status(404).json({ error: 'unknown preference' })
+      return response.json({ id: updated.id, enabled: updated.enabled })
+    } catch (error) {
+      return next(error)
+    }
+  })
+
+  app.delete('/api/creator/preferences/:preferenceId', (request, response) => {
+    const creator = currentProfile(context, request)
+    if (!creator) return response.status(404).json({ error: 'no creator profile' })
+    const forgotten = forgetPreference(context.control.preferences, request.params.preferenceId ?? '')
+    if (!forgotten) return response.status(404).json({ error: 'unknown preference' })
+    return response.json({ forgotten: true })
+  })
+
+  app.post('/api/creator/personalisation/reset', (request, response) => {
+    const creator = currentProfile(context, request)
+    if (!creator) return response.status(404).json({ error: 'no creator profile' })
+    return response.json(resetPersonalization(context.control.preferences, creator.id))
   })
 
   app.get('/api/creator/coming-soon', (_request, response) => {

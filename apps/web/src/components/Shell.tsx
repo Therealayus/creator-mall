@@ -7,6 +7,7 @@ const LINKS: Array<{ to: string; label: string }> = [
   { to: '/platforms', label: 'Platform support' },
   { to: '/updates', label: 'Your updates' },
   { to: '/coming-soon', label: 'Coming soon' },
+  { to: '/you', label: "What we've learned" },
 ]
 
 export function Shell(props: {

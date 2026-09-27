@@ -57,4 +57,6 @@ export * from './auth/rbac.js'
 export * from './curation/source-score.js'
 export * from './curation/candidate-paths.js'
 
+export * from './preferences/learning.js'
+
 export * from './health/report.js'

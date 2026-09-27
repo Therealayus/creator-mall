@@ -1,3 +1,5 @@
+import { authedFetch } from './auth.js'
+
 /**
  * Typed client for the creator-facing API.
  *
@@ -127,13 +129,23 @@ export function fetchOverview(): Promise<CreatorOverview> {
   return request<CreatorOverview>('/api/creator/overview')
 }
 
+export function recordObservation(input: {
+  kind: string
+  subject: string
+  detail?: string | null
+  platformSlug?: string | null
+}): Promise<{ learned: number; changed: string[] }> {
+  return authedFetch('/api/creator/observations', { method: 'POST', body: JSON.stringify(input) })
+}
+
 export function validateContent(input: {
   platform: string
   option: string
   text: string
   mediaCount: number
 }): Promise<ValidationResult> {
-  return request<ValidationResult>('/api/creator/validate', {
+  // Mutating calls go through authedFetch so the CSRF token rides with them.
+  return authedFetch<ValidationResult>('/api/creator/validate', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -145,7 +157,7 @@ export function fetchDraft(input: {
   brief: string
   tone?: string
 }): Promise<DraftResult> {
-  return request<DraftResult>('/api/creator/draft', {
+  return authedFetch<DraftResult>('/api/creator/draft', {
     method: 'POST',
     body: JSON.stringify(input),
   })

@@ -32,7 +32,7 @@ export async function probeCandidatePaths(
   for (const platform of control.listPlatforms()) {
     if (platform.status === 'SUNSET') continue
     for (const candidate of candidatesFor(platform.slug)) {
-      const source = toSource(candidate, platform.name)
+      const source = toSource(candidate)
       if (known.has(source.id)) continue
       known.add(source.id)
       pending.push({ source, platformId: platform.id })
