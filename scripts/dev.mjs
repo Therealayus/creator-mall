@@ -20,7 +20,14 @@ let shuttingDown = false
 for (const task of TASKS) {
   const child = spawn(task.command, task.args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
+    env: {
+      ...process.env,
+      // Local development runs with no operator token, and the admin API is
+      // closed by default. Opt the dev processes in explicitly rather than
+      // falling open: production never runs through this script, so the gate
+      // stays shut everywhere else.
+      ALLOW_UNAUTHENTICATED_ADMIN: process.env.ALLOW_UNAUTHENTICATED_ADMIN ?? 'true',
+    },
     shell: process.platform === 'win32',
   })
 
