@@ -22,6 +22,13 @@ import {
 import type { CreatorAccount, CreatorProfile, Permission, Session } from '@creator-mall/core'
 import type { AppContext } from '../context.js'
 import { nowIso } from '@creator-mall/core'
+import { RateLimiter, clientAddress } from './rate-limit.js'
+import {
+  confirmEmailVerification,
+  confirmPasswordReset,
+  requestEmailVerification,
+  requestPasswordReset,
+} from './account-recovery.js'
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -114,6 +121,29 @@ const LOCK_MS = 15 * 60_000
 
 export function authRoutes(context: AppContext): Router {
   const router = Router()
+  const limiter = limiterFor(context)
+
+  /**
+   * Sign-in and sign-up are the two endpoints worth limiting, and they are
+   * limited before the body is even read.
+   */
+  router.use((request, response, next) => {
+    if (request.method !== 'POST') return next()
+    if (request.path === '/password-reset' || request.path === '/password-reset/confirm') return next()
+    if (request.path !== '/login' && request.path !== '/register') return next()
+
+    const decision = limiter.check(limitKey(context, request, 'auth'), {
+      limit: context.config.AUTH_RATE_LIMIT,
+      windowMs: context.config.AUTH_RATE_WINDOW_MS,
+      bucket: 'auth',
+    })
+    if (!decision.allowed) {
+      response.setHeader('retry-after', String(decision.retryAfterSeconds))
+      response.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' })
+      return
+    }
+    return next()
+  })
 
   router.post('/register', (request, response) => {
     const parsed = registerSchema.safeParse(request.body ?? {})
@@ -154,7 +184,10 @@ export function authRoutes(context: AppContext): Router {
         passwordHash: await hashPassword(password),
         displayName: displayName.trim(),
         role: 'CREATOR',
-        status: 'ACTIVE',
+        // Pending means created but not yet confirmed. Only used when the
+        // operator asks for verification, so nobody is locked out of their own
+        // account by a mail provider that is not wired up yet.
+        status: context.config.REQUIRE_EMAIL_VERIFICATION ? 'PENDING' : 'ACTIVE',
         createdAt: at,
         lastLoginAt: at,
         consecutiveFailures: 0,
@@ -186,7 +219,17 @@ export function authRoutes(context: AppContext): Router {
       response
         .status(201)
         .setHeader('set-cookie', sessionCookieHeader(token, { maxAgeMs: context.config.SESSION_TTL_HOURS * 3_600_000, secure: context.config.COOKIE_SECURE }))
-        .json({ account: toPublicAccount(account), profile, csrfToken: session.csrfToken })
+        .json({
+          account: toPublicAccount(account),
+          profile,
+          csrfToken: session.csrfToken,
+          ...(context.config.REQUIRE_EMAIL_VERIFICATION
+            ? (() => {
+                const issued = requestEmailVerification(context, account, baseUrlOf(request))
+                return issued.token ? { devVerifyToken: issued.token } : {}
+              })()
+            : {}),
+        })
     })().catch(() => {
       response.status(500).json({ error: 'Could not create the account just now.' })
     })
@@ -213,6 +256,17 @@ export function authRoutes(context: AppContext): Router {
 
       if (account.lockedUntil && new Date(account.lockedUntil).getTime() > Date.now()) {
         response.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' })
+        return
+      }
+
+      // Only enforced when the operator asks for it, because a mail provider is
+      // not wired up yet and an unverified account that cannot sign in is a
+      // locked-out customer.
+      if (context.config.REQUIRE_EMAIL_VERIFICATION && account.status === 'PENDING') {
+        response.status(403).json({
+          error: 'Confirm your email address first.',
+          problems: ['Check your inbox for the confirmation link.'],
+        })
         return
       }
 
@@ -271,7 +325,100 @@ export function authRoutes(context: AppContext): Router {
     })
   })
 
+  /**
+   * Password reset.
+   *
+   * The answer is identical whether or not the address has an account, so this
+   * endpoint cannot be used to find out who is a customer.
+   */
+  router.post('/password-reset', (request, response) => {
+    const limited = limiter.check(limitKey(context, request, 'password-reset'), {
+      limit: context.config.AUTH_RATE_LIMIT,
+      windowMs: context.config.AUTH_RATE_WINDOW_MS,
+      bucket: 'password-reset',
+    })
+    if (!limited.allowed) {
+      response.setHeader('retry-after', String(limited.retryAfterSeconds))
+      response.status(429).json({ error: 'Too many requests. Try again shortly.' })
+      return
+    }
+
+    const parsed = z.object({ email: z.string().min(3).max(254) }).safeParse(request.body ?? {})
+    if (!parsed.success) {
+      response.status(400).json({ error: 'Enter your email address.' })
+      return
+    }
+
+    const result = requestPasswordReset(context, parsed.data.email, baseUrlOf(request))
+    response.status(202).json({
+      ...result.response,
+      ...(result.token ? { devToken: result.token, devLink: result.link } : {}),
+    })
+  })
+
+  router.post('/password-reset/confirm', (request, response) => {
+    const parsed = z
+      .object({ token: z.string().min(10).max(400), password: z.string().min(1).max(200) })
+      .safeParse(request.body ?? {})
+    if (!parsed.success) {
+      response.status(400).json({ error: 'That reset link is not valid any more.' })
+      return
+    }
+
+    void (async () => {
+      const result = await confirmPasswordReset(context, parsed.data.token, parsed.data.password)
+      if (!result.ok) {
+        response.status(result.status).json({ error: result.error })
+        return
+      }
+      response.json({ ok: true, message: 'Your password has been changed. Sign in with it.' })
+    })().catch(() => {
+      response.status(500).json({ error: 'Could not change the password just now.' })
+    })
+  })
+
+  router.post('/verify-email', (request, response) => {
+    const parsed = z.object({ token: z.string().min(10).max(400) }).safeParse(request.body ?? {})
+    if (!parsed.success) {
+      response.status(400).json({ error: 'That confirmation link is not valid any more.' })
+      return
+    }
+    const result = confirmEmailVerification(context, parsed.data.token)
+    if (!result.ok) {
+      response.status(result.status).json({ error: result.error })
+      return
+    }
+    response.json({ ok: true, message: 'Thanks, your email address is confirmed.' })
+  })
+
   return router
+}
+
+/**
+ * One limiter per context, so limits are per process rather than per route and
+ * a person cannot get a fresh allowance by hitting a different endpoint.
+ */
+const limiters = new WeakMap<object, RateLimiter>()
+
+function limiterFor(context: AppContext): RateLimiter {
+  let limiter = limiters.get(context)
+  if (!limiter) {
+    limiter = new RateLimiter()
+    limiters.set(context, limiter)
+  }
+  return limiter
+}
+
+function limitKey(context: AppContext, request: Request, route: string): string {
+  const address = clientAddress(request, context.config.TRUST_PROXY)
+  return `${route}:${address}`
+}
+
+/** Where a link should send someone, taken from the request that asked. */
+function baseUrlOf(request: Request): string {
+  const host = request.get('host') ?? 'localhost:4000'
+  const proto = request.get('x-forwarded-proto') ?? request.protocol ?? 'http'
+  return `${proto}://${host}`
 }
 
 function flattenIssues(error: z.ZodError): string[] {

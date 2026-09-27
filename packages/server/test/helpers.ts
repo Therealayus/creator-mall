@@ -162,8 +162,12 @@ export async function signedInClient(
 }
 
 /** Signs in an account that already exists, for tests that restart a process. */
-export async function signedInExistingClient(baseUrl: string, email: string): Promise<SignedInClient> {
-  return authenticate(baseUrl, '/api/auth/login', { email, password: 'filminginthecloud7' })
+export async function signedInExistingClient(
+  baseUrl: string,
+  email: string,
+  password = 'filminginthecloud7',
+): Promise<SignedInClient> {
+  return authenticate(baseUrl, '/api/auth/login', { email, password })
 }
 
 async function authenticate(baseUrl: string, path: string, body: unknown): Promise<SignedInClient> {

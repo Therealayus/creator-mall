@@ -38,6 +38,21 @@ const schema = z.object({
    * DATA_DIR when one is configured, and memory otherwise.
    */
   ASSET_STORAGE: z.enum(['file', 'memory']).optional(),
+  /** Sign-in attempts allowed per IP per window. */
+  AUTH_RATE_LIMIT: z.coerce.number().int().min(1).max(10_000).default(60),
+  AUTH_RATE_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(15 * 60_000),
+  /**
+   * Only turn this on behind a proxy you control. A forwarded header that
+   * anyone can set is not a rate limit.
+   */
+  TRUST_PROXY: z.coerce.boolean().default(false),
+  /** Blocks sign-in until the address is confirmed. Off by default. */
+  REQUIRE_EMAIL_VERIFICATION: z.coerce.boolean().default(false),
+  /**
+   * Returns reset and verification links in the API response. Development only,
+   * and forced off in production regardless of what is set here.
+   */
+  EXPOSE_ACCOUNT_LINKS: z.coerce.boolean().default(false),
 
   /** World Engine cadence. */
   RESEARCH_INTERVAL_MS: z.coerce.number().int().min(30_000).default(15 * 60_000),

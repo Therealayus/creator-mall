@@ -23,6 +23,13 @@ export interface CreatorAccount {
   lastLoginAt: string | null
   consecutiveFailures: number
   lockedUntil: string | null
+  /** Null until the address is confirmed. Only enforced when configured. */
+  emailVerifiedAt?: string | null
+  /** Hashed, never the token itself. */
+  emailVerificationTokenHash?: string | null
+  emailVerificationExpiresAt?: string | null
+  passwordResetTokenHash?: string | null
+  passwordResetExpiresAt?: string | null
 }
 
 /** What the client is allowed to see about itself. Never includes the hash. */
