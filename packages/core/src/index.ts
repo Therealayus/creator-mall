@@ -14,6 +14,7 @@ export * from './types/evolution.js'
 export * from './types/adapter.js'
 export * from './types/creator.js'
 export * from './types/health.js'
+export * from './types/auth.js'
 export * from './util.js'
 
 export * from './capabilities/registry.js'
@@ -48,5 +49,9 @@ export * from './prompts/versioning.js'
 export * from './platform/bootstrap.js'
 
 export * from './composer/draft.js'
+
+export * from './auth/password.js'
+export * from './auth/session.js'
+export * from './auth/rbac.js'
 
 export * from './health/report.js'

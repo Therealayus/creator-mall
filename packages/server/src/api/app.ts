@@ -24,6 +24,7 @@ import {
   validateForCreator,
   whyForCreator,
 } from './creator.js'
+import { attachSession, authRoutes, requireAuth } from './auth.js'
 
 export function createApp(context: AppContext): Express {
   const app = express()
@@ -32,6 +33,12 @@ export function createApp(context: AppContext): Express {
   app.use(cors())
   app.use(express.json({ limit: '256kb' }))
 
+  // Identity first: every later guard can rely on request.account / request.session.
+  app.use(attachSession(context))
+  app.use('/api/auth', authRoutes(context))
+  // Operator surfaces: platforms directory, source registry, evolution log, knowledge.
+  // All of them need the admin role; the creator API below is per-account.
+  app.use(['/api/platforms', '/api/sources', '/api/evolution', '/api/knowledge'], adminGuard(context))
   app.use('/api/admin', adminGuard(context))
 
   app.get('/api/health', (_request, response) => {
@@ -188,8 +195,10 @@ export function createApp(context: AppContext): Express {
   // ── Creator-facing surface ──────────────────────────────────────────────────
   // Plain language only: options, limits, reasons, sources.
 
-  app.get('/api/creator/overview', (_request, response) => {
-    response.json(creatorOverview(context, context.creatorSession()))
+  app.use('/api/creator', requireAuth(context))
+
+  app.get('/api/creator/overview', (request, response) => {
+    response.json(creatorOverview(context, currentProfile(context, request)))
   })
 
   app.get('/api/creator/coming-soon', (_request, response) => {
@@ -278,7 +287,7 @@ export function createApp(context: AppContext): Express {
     })()
   })
 
-  app.get('/evolution-center', (_request, response) => {
+  app.get('/evolution-center', adminGuard(context), (_request, response) => {
     response.type('html').send(renderEvolutionCenter(context))
   })
 
@@ -314,6 +323,15 @@ function mountWebApp(app: Express): void {
   })
 }
 
+/**
+ * The profile the request acts as. A signed-in account always wins, so one creator can
+ * never see another's alerts. The seeded demo profile is only used with no session.
+ */
+function currentProfile(context: AppContext, request: Request) {
+  if (request.account) return context.control.profileForAccount(request.account.id)
+  return context.creatorSession()
+}
+
 /** Express query values are `string | string[] | undefined`; normalise them. */
 function queryString(value: unknown): string {
   if (typeof value === 'string') return value
@@ -321,10 +339,39 @@ function queryString(value: unknown): string {
   return ''
 }
 
-/** Admin routes are token-guarded whenever a token is configured. */
+/**
+ * Internal routes need the admin role.
+ *
+ * Two doors: a session belonging to an admin account, or the bearer token used
+ * by operators and CI. Development without a token stays open so the Evolution
+ * Center is usable out of the box; production must configure one.
+ */
 function adminGuard(context: AppContext) {
   return (request: Request, response: Response, next: NextFunction): void => {
     const token = context.config.ADMIN_TOKEN
+    const provided = request.header('x-admin-token') ?? request.header('authorization')?.replace(/^Bearer\s+/i, '')
+
+    // An explicit operator token wins, so a signed-in creator can still be given
+    // operator access for one call.
+    if (token && provided) {
+      if (provided !== token) {
+        response.status(401).json({ error: 'admin access required' })
+        return
+      }
+      next()
+      return
+    }
+
+    if (request.account) {
+      if (request.account.role !== 'ADMIN') {
+        // Signed in, but this surface is not theirs.
+        response.status(403).json({ error: 'You do not have access to that.' })
+        return
+      }
+      next()
+      return
+    }
+
     if (!token) {
       if (context.config.NODE_ENV === 'production') {
         response.status(503).json({ error: 'ADMIN_TOKEN must be configured in production' })
@@ -333,11 +380,7 @@ function adminGuard(context: AppContext) {
       next()
       return
     }
-    const provided = request.header('x-admin-token') ?? request.header('authorization')?.replace(/^Bearer\s+/i, '')
-    if (provided !== token) {
-      response.status(401).json({ error: 'admin token required' })
-      return
-    }
-    next()
+
+    response.status(401).json({ error: 'admin access required' })
   }
 }

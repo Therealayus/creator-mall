@@ -24,6 +24,14 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
 }
 
+export function isSessionExpired(session: Session, clock: () => number = Date.now): boolean {
+  return new Date(session.expiresAt).getTime() <= clock()
+}
+
+export function isRevoked(session: Session): boolean {
+  return session.revokedAt !== null
+}
+
 export interface CreateSessionInput {
   accountId: string
   ttlMs: number
@@ -52,20 +60,15 @@ export function newSession(input: CreateSessionInput): { session: Session; token
   }
 }
 
-export function findSessionByToken(sessions: ReadonlyArray<Session>, token: string, clock: () => number = Date.now): Session | undefined {
+export function findSessionByToken(
+  sessions: ReadonlyArray<Session>,
+  token: string,
+  clock: () => number = Date.now,
+): Session | undefined {
   const hash = hashToken(token)
   return sessions.find(
-    (session) => session.tokenHash === hash && session.revokedAt === null && !isExpired(session, clock),
+    (session) => session.tokenHash === hash && !isRevoked(session) && !isSessionExpired(session, clock),
   )
-}
-
-export function isExpired(session: Session, clock: () => number = Date.now): boolean {
-  return new Date(session.expiresAt).getTime() <= clock()
-}
-
-export function isRevoked(session: Session): boolean {
-  if (!session.revokedAt) return false
-  return true
 }
 
 export function revokeSession(session: Session, clock: () => number = Date.now): Session {
@@ -99,7 +102,10 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return result
 }
 
-export function sessionCookieHeader(token: string, options: { maxAgeMs: number; secure: boolean; sameSite?: 'Lax' | 'Strict' }): string {
+export function sessionCookieHeader(
+  token: string,
+  options: { maxAgeMs: number; secure: boolean; sameSite?: 'Lax' | 'Strict' },
+): string {
   const parts = [
     `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
     'Path=/',

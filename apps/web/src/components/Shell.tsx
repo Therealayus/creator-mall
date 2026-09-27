@@ -9,7 +9,13 @@ const LINKS: Array<{ to: string; label: string }> = [
   { to: '/coming-soon', label: 'Coming soon' },
 ]
 
-export function Shell(props: { creator: string; unread: number; children: ReactNode }): ReactNode {
+export function Shell(props: {
+  creator: string
+  role?: string
+  unread: number
+  onSignOut: () => void
+  children: ReactNode
+}): ReactNode {
   return (
     <div className="shell">
       <header className="topbar">
@@ -31,11 +37,22 @@ export function Shell(props: { creator: string; unread: number; children: ReactN
             </NavLink>
           ))}
         </nav>
+        <div className="account">
+          {props.role === 'ADMIN' && (
+            <a className="pill" href="/evolution-center">
+              Operator view
+            </a>
+          )}
+          <span className="account-name">{props.creator}</span>
+          <button className="link-button" onClick={props.onSignOut}>
+            Sign out
+          </button>
+        </div>
       </header>
       <main className="main">{props.children}</main>
       <footer className="footer">
-        Signed in as {props.creator}. Platform facts come from official sources and are re-checked
-        automatically · <Link to="/platforms">Platform support</Link> · <a href="/evolution-center">Operator view</a>
+        Platform facts come from official sources and are re-checked automatically ·{' '}
+        <Link to="/platforms">Platform support</Link>
       </footer>
     </div>
   )

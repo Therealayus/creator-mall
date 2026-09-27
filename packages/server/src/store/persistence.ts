@@ -3,6 +3,7 @@ import type {
   CreatorNotification,
   CreatorProfile,
 } from '@creator-mall/core'
+import type { CreatorAccount } from '@creator-mall/core'
 import type {
   ChangeProposal,
   DependencyEdge,
@@ -32,6 +33,7 @@ export interface ControlPlaneState {
   prompts: PromptVersion[]
   templates: TemplateDefinition[]
   creators: CreatorProfile[]
+  accounts: CreatorAccount[]
   notifications: CreatorNotification[]
   impacts: CreatorImpact[]
   knowledge: SerializedKnowledge

@@ -4,10 +4,13 @@ import {
   PromptLibrary,
   createKnowledgeStore,
   isExpired,
+  isRevoked,
+  isSessionExpired,
   newId,
   nowIso,
+  revokeSession,
 } from '@creator-mall/core'
-import type { KnowledgeStore } from '@creator-mall/core'
+import type { CreatorAccount, KnowledgeStore, Session } from '@creator-mall/core'
 import type {
   ChangeProposal,
   CreatorImpact,
@@ -152,6 +155,87 @@ export class ControlPlane {
     return this.listProposals().find((proposal) => proposal.id === id)
   }
 
+  // ---------------------------------------------------------------- accounts
+  /**
+   * Accounts and sessions.
+   *
+   * Identity is kept apart from `CreatorProfile`: learning about a creator must
+   * never grant access, and losing an account must not lose what was learned.
+   */
+  private readonly accounts = new Map<string, CreatorAccount>()
+  private readonly sessions = new Map<string, Session>()
+
+  /** accountId → creator profile id. One profile per account, by design. */
+  readonly profileAccountLinks = new Map<string, string>()
+
+  listAccounts(): CreatorAccount[] {
+    return [...this.accounts.values()]
+  }
+
+  getAccount(id: string): CreatorAccount | undefined {
+    return this.accounts.get(id)
+  }
+
+  getAccountByEmail(email: string): CreatorAccount | undefined {
+    const key = email.trim().toLowerCase()
+    return [...this.accounts.values()].find((account) => account.email.toLowerCase() === key)
+  }
+
+  /** The creator profile that belongs to an account, if it has one. */
+  profileForAccount(accountId: string): CreatorProfile | undefined {
+    const profileId = this.profileAccountLinks.get(accountId)
+    return profileId ? this.creators.get(profileId) : undefined
+  }
+
+  linkProfileToAccount(accountId: string, profileId: string): void {
+    this.profileAccountLinks.set(accountId, profileId)
+  }
+
+  upsertAccount(account: CreatorAccount): CreatorAccount {
+    this.accounts.set(account.id, account)
+    return account
+  }
+
+  addSession(session: Session): Session {
+    this.sessions.set(session.id, session)
+    return session
+  }
+
+  replaceSession(session: Session): Session {
+    this.sessions.set(session.id, session)
+    return session
+  }
+
+  getSession(id: string): Session | undefined {
+    return this.sessions.get(id)
+  }
+
+  listSessions(): Session[] {
+    return [...this.sessions.values()]
+  }
+
+  revokeSessionsForAccount(accountId: string, clock: () => number = Date.now): number {
+    let revoked = 0
+    for (const session of this.sessions.values()) {
+      if (session.accountId === accountId && !isRevoked(session)) {
+        this.sessions.set(session.id, revokeSession(session, clock))
+        revoked += 1
+      }
+    }
+    return revoked
+  }
+
+  pruneSessions(clock: () => number = Date.now): number {
+    let removed = 0
+    for (const [id, session] of this.sessions) {
+      if (isSessionExpired(session, clock) || isRevoked(session)) {
+        this.sessions.delete(id)
+        removed += 1
+      }
+    }
+    return removed
+  }
+
   // ---------------------------------------------------------------- creators
   listCreators(): CreatorProfile[] {
     return [...this.creators.values()]
@@ -240,6 +324,7 @@ export class ControlPlane {
       prompts: this.prompts.all(),
       templates: this.listTemplates(),
       creators: this.listCreators(),
+      accounts: this.listAccounts(),
       notifications: [...this.notifications.values()].flat(),
       impacts: this.listImpacts(),
       knowledge: {
@@ -260,6 +345,7 @@ export class ControlPlane {
     for (const event of state.events) this.addEvent(event)
     for (const proposal of state.proposals) this.addProposal(proposal)
     for (const creator of state.creators) this.creators.set(creator.id, creator)
+    for (const account of state.accounts ?? []) this.accounts.set(account.id, account)
     for (const notification of state.notifications) this.addNotification(notification)
     for (const impact of state.impacts) this.addImpact(impact)
     for (const template of state.templates) this.addTemplate(template)

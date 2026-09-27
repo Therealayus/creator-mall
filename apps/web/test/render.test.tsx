@@ -10,6 +10,7 @@ import { PlatformPage } from '../src/pages/PlatformPage.js'
 import { ComingSoonPage } from '../src/pages/ComingSoonPage.js'
 import { UpdatesPage } from '../src/pages/UpdatesPage.js'
 import type { CreatorOverview } from '../src/lib/api.js'
+import type { AuthResult } from '../src/lib/auth.js'
 
 /**
  * Server-render smoke tests.
@@ -18,6 +19,20 @@ import type { CreatorOverview } from '../src/lib/api.js'
  * which is enough to catch broken imports, bad hooks, crashes on real data and
  * accidental jargon in creator-facing copy.
  */
+
+const session: AuthResult = {
+  account: {
+    id: 'acc_1',
+    email: 'creator@example.com',
+    displayName: 'Demo video creator',
+    role: 'CREATOR',
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00.000Z',
+    lastLoginAt: '2026-09-27T12:00:00.000Z',
+  },
+  profile: { id: 'cr_1', platformSlugs: ['instagram'] },
+  csrfToken: 'csrf-token',
+}
 
 const overview: CreatorOverview = {
   creator: { id: 'cr_demo', name: 'Demo video creator', platforms: ['instagram'] },
@@ -90,7 +105,7 @@ function renderTree(node: ReactNode, path: string): string {
     [
       {
         path: '/',
-        element: <Shell creator={overview.creator.name} unread={overview.counts.updatesToRead}>{node}</Shell>,
+        element: <Shell creator={session.account.displayName} role={session.account.role} unread={overview.counts.updatesToRead} onSignOut={() => undefined}>{node}</Shell>,
         children: [
           { index: true, element: node },
           { path: '*', element: node },

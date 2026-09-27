@@ -12,6 +12,19 @@ const schema = z.object({
   /** Bearer token for admin/evolution routes. Empty disables auth (dev only). */
   ADMIN_TOKEN: z.string().default(''),
 
+  // ─── Accounts and sessions ────────────────────────────────────────────────
+  SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(24 * 14),
+  PASSWORD_MIN_LENGTH: z.coerce.number().int().min(6).max(64).default(10),
+  REGISTRATION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value !== 'false'),
+  /** Always true behind TLS; set explicitly when terminating TLS elsewhere. */
+  COOKIE_SECURE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+
   /**
    * Creator the web app acts as until real accounts exist (Phase 3).
    * Empty = the single seeded demo creator.

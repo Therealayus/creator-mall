@@ -16,14 +16,14 @@ export interface RouteResponse {
  * testable: routes decide what each host "serves", including robots.txt.
  */
 export function scriptedFetch(
-  routes: Record<string, { status?: number; body?: string; contentType?: string; headers?: Record<string, string> }>,
+  routes: Record<string, { status?: number; body?: string | (() => string); contentType?: string; headers?: Record<string, string> }>,
   fallback?: { status?: number; body?: string; contentType?: string; headers?: Record<string, string> },
 ): typeof fetch {
   return (async (input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     const route = routes[url] ?? routes[new URL(url).host] ?? fallback
     const status = route?.status ?? (route ? 200 : 404)
-    const body = route?.body ?? ''
+    const body = typeof route?.body === 'function' ? route.body() : (route?.body ?? '')
     const contentType = route?.contentType ?? 'text/html; charset=utf-8'
     const headers = new Headers(route?.headers ?? {})
     headers.set('content-type', contentType)
@@ -149,3 +149,58 @@ export async function startServer(context: AppContext): Promise<RunningServer> {
 }
 
 export const CLOCK = (): number => Date.parse('2026-09-27T12:00:00.000Z')
+
+export interface SignedInClient {
+  get: (path: string, init?: RequestInit) => Promise<RouteResponse>
+  accountId: string
+  csrf: string | null
+}
+
+/**
+ * Registers a creator and returns a client that carries the session cookie and
+ * the CSRF token, so tests exercise the same path a browser does.
+ */
+export async function signedInClient(
+  baseUrl: string,
+  overrides: { email?: string; platformSlugs?: string[] } = {},
+): Promise<SignedInClient> {
+  const cookie = { value: '' }
+  const state: SignedInClient = {
+    accountId: '',
+    csrf: null,
+    get: async (path, init) => {
+      const headers: Record<string, string> = { 'content-type': 'application/json' }
+      if (cookie.value) headers.cookie = cookie.value
+      if (state.csrf && init?.method && init.method !== 'GET') headers['x-csrf-token'] = state.csrf
+
+      const response = await fetch(baseUrl + path, {
+        ...init,
+        headers: { ...headers, ...((init?.headers as Record<string, string>) ?? {}) },
+      })
+      const setCookie = response.headers.get('set-cookie')
+      if (setCookie) cookie.value = setCookie.split(';')[0] ?? ''
+      const body = await response.text()
+      if (state.csrf === null && response.ok) {
+        try {
+          state.csrf = (JSON.parse(body) as { csrfToken?: string }).csrfToken ?? null
+        } catch {
+          state.csrf = null
+        }
+      }
+      return { status: response.status, contentType: response.headers.get('content-type') ?? '', body }
+    },
+  }
+
+  const created = await state.get('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: overrides.email ?? 'creator@example.com',
+      password: 'filminginthecloud7',
+      displayName: 'Test creator',
+      platformSlugs: overrides.platformSlugs ?? ['instagram'],
+    }),
+  })
+  if (created.status !== 201) throw new Error(`could not sign up: ${created.status} ${created.body}`)
+  state.accountId = (JSON.parse(created.body) as { account: { id: string } }).account.id
+  return state
+}

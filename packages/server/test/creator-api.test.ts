@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { runResearchCycle } from '../src/world-engine/pipeline.js'
-import { CLOCK, forkContext, platformRoutes, startServer, testContext } from './helpers.js'
+import { CLOCK, forkContext, platformRoutes, signedInClient, startServer, testContext } from './helpers.js'
 import type { AppContext } from '../src/context.js'
 
 /** A world where a real change has been detected, so "why" has something to say. */
@@ -29,12 +29,14 @@ describe('creator-facing api', () => {
   it('returns a plain-language overview of every platform and option', async () => {
     const context = await world()
     const server = await startServer(context)
+    const client = await signedInClient(server.baseUrl)
     try {
-      const response = await server.get('/api/creator/overview')
+      const response = await client.get('/api/creator/overview')
       assert.equal(response.status, 200)
       const overview = JSON.parse(response.body)
 
-      assert.equal(overview.creator.name, 'Demo video creator')
+      // The overview is scoped to the signed-in creator, not the seeded demo profile.
+      assert.equal(overview.creator.name, 'Test creator')
       assert.ok(overview.platforms.length >= 7)
       assert.ok(overview.counts.optionsReady > 0)
 
@@ -62,8 +64,9 @@ describe('creator-facing api', () => {
   it('explains unavailable options instead of hiding them', async () => {
     const context = await world()
     const server = await startServer(context)
+    const client = await signedInClient(server.baseUrl)
     try {
-      const overview = JSON.parse((await server.get('/api/creator/overview')).body)
+      const overview = JSON.parse((await client.get('/api/creator/overview')).body)
       const instagram = overview.platforms.find((platform: { slug: string }) => platform.slug === 'instagram')
 
       // An option the platform has not confirmed is offered, but disabled with a reason.
@@ -84,15 +87,16 @@ describe('creator-facing api', () => {
   it('validates content against verified limits', async () => {
     const context = await world()
     const server = await startServer(context)
+    const client = await signedInClient(server.baseUrl)
     try {
-      const short = await server.get('/api/creator/validate', {
+      const short = await client.get('/api/creator/validate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ platform: 'instagram', option: 'SHORT_VIDEO', text: 'a'.repeat(10), mediaCount: 1 }),
       })
       assert.equal(JSON.parse(short.body).valid, true)
 
-      const unsupported = await server.get('/api/creator/validate', {
+      const unsupported = await client.get('/api/creator/validate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ platform: 'instagram', option: 'SPATIAL_POST', text: 'hello', mediaCount: 0 }),
@@ -101,7 +105,7 @@ describe('creator-facing api', () => {
       assert.equal(unsupportedBody.valid, false)
       assert.match(unsupportedBody.issues[0].message, /not confirmed/i)
 
-      const invalid = await server.get('/api/creator/validate', {
+      const invalid = await client.get('/api/creator/validate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ platform: 'instagram' }),
@@ -115,8 +119,9 @@ describe('creator-facing api', () => {
   it('produces a draft that says where it came from', async () => {
     const context = await world()
     const server = await startServer(context)
+    const client = await signedInClient(server.baseUrl)
     try {
-      const response = await server.get('/api/creator/draft', {
+      const response = await client.get('/api/creator/draft', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ platform: 'instagram', option: 'SHORT_VIDEO', brief: 'batch filming a week of content' }),
@@ -133,7 +138,7 @@ describe('creator-facing api', () => {
 
       const unknownPlatform = JSON.parse(
         (
-          await server.get('/api/creator/draft', {
+          await client.get('/api/creator/draft', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ platform: 'brandnew', option: 'TEXT_POST', brief: 'x' }),
@@ -150,8 +155,9 @@ describe('creator-facing api', () => {
   it('answers "why did this change?" in creator language with sources', async () => {
     const context = await world()
     const server = await startServer(context)
+    const client = await signedInClient(server.baseUrl)
     try {
-      const response = await server.get('/api/creator/platforms/instagram/why?option=SHORT_VIDEO')
+      const response = await client.get('/api/creator/platforms/instagram/why?option=SHORT_VIDEO')
       assert.equal(response.status, 200)
       const why = JSON.parse(response.body)
       assert.equal(why.optionKey, 'SHORT_VIDEO')
@@ -161,10 +167,10 @@ describe('creator-facing api', () => {
       assert.ok(why.sources.length > 0)
       assert.ok(why.sources[0].url)
 
-      const missing = await server.get('/api/creator/platforms/instagram/why')
+      const missing = await client.get('/api/creator/platforms/instagram/why')
       assert.equal(missing.status, 400)
 
-      const unknown = await server.get('/api/creator/platforms/nope/why?option=SHORT_VIDEO')
+      const unknown = await client.get('/api/creator/platforms/nope/why?option=SHORT_VIDEO')
       assert.equal(unknown.status, 404)
     } finally {
       await server.close()
@@ -177,8 +183,9 @@ describe('creator-facing api', () => {
     context.control.upsertPlatform({ ...platform, status: 'COMING_SOON' })
 
     const server = await startServer(context)
+    const client = await signedInClient(server.baseUrl)
     try {
-      const comingSoon = JSON.parse((await server.get('/api/creator/coming-soon')).body).comingSoon
+      const comingSoon = JSON.parse((await client.get('/api/creator/coming-soon')).body).comingSoon
       assert.equal(comingSoon.length, 1)
       assert.equal(comingSoon[0].slug, 'youtube')
       assert.equal(comingSoon[0].stage, 'Coming soon')
