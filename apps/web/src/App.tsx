@@ -1,24 +1,40 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Suspense, lazy } from 'react'
 import { ApiError, fetchOverview } from './lib/api.js'
 import { isPublicPath } from './lib/view-models.js'
 import type { CreatorOverview } from './lib/api.js'
 import { authedFetch, restoreSession, signOut } from './lib/auth.js'
 import type { AuthResult } from './lib/auth.js'
 import { Shell } from './components/Shell.js'
-import { HomePage } from './pages/HomePage.js'
-import { CreatePage } from './pages/CreatePage.js'
-import { PlatformPage } from './pages/PlatformPage.js'
-import { UpdatesPage } from './pages/UpdatesPage.js'
-import { AssetsPage } from './pages/AssetsPage.js'
-import { ToolsPage } from './pages/ToolsPage.js'
-import { ResetPasswordPage } from './pages/ResetPasswordPage.js'
-import { VerifyEmailPage } from './pages/VerifyEmailPage.js'
-import { ComingSoonPage } from './pages/ComingSoonPage.js'
-import { SignInPage } from './pages/SignInPage.js'
-import { PersonalisationPage } from './pages/PersonalisationPage.js'
 
+
+
+
+
+
+
+
+
+
+
+
+
+// Route-level code splitting. Twelve pages and their view models used to ship as
+// one 212 kB chunk, so a first-time visitor downloaded the library page and the
+// reset-password page before reading a word of the home feed.
+const HomePage = lazy(async () => ({ default: (await import('./pages/HomePage.js')).HomePage }))
+const CreatePage = lazy(async () => ({ default: (await import('./pages/CreatePage.js')).CreatePage }))
+const PlatformPage = lazy(async () => ({ default: (await import('./pages/PlatformPage.js')).PlatformPage }))
+const UpdatesPage = lazy(async () => ({ default: (await import('./pages/UpdatesPage.js')).UpdatesPage }))
+const ComingSoonPage = lazy(async () => ({ default: (await import('./pages/ComingSoonPage.js')).ComingSoonPage }))
+const SignInPage = lazy(async () => ({ default: (await import('./pages/SignInPage.js')).SignInPage }))
+const PersonalisationPage = lazy(async () => ({ default: (await import('./pages/PersonalisationPage.js')).PersonalisationPage }))
+const AssetsPage = lazy(async () => ({ default: (await import('./pages/AssetsPage.js')).AssetsPage }))
+const ToolsPage = lazy(async () => ({ default: (await import('./pages/ToolsPage.js')).ToolsPage }))
+const ResetPasswordPage = lazy(async () => ({ default: (await import('./pages/ResetPasswordPage.js')).ResetPasswordPage }))
+const VerifyEmailPage = lazy(async () => ({ default: (await import('./pages/VerifyEmailPage.js')).VerifyEmailPage }))
 type Phase = 'checking' | 'signed-out' | 'loading' | 'ready' | 'error'
 
 export function App(): ReactNode {
@@ -104,7 +120,14 @@ export function App(): ReactNode {
 
   return (
     <Shell creator={session.account.displayName} role={session.account.role} unread={overview.counts.updatesToRead} onSignOut={() => void handleSignOut()}>
-      <Routes>
+      <Suspense
+        fallback={
+          <p className="empty" role="status">
+            Loading this page…
+          </p>
+        }
+      >
+        <Routes>
         <Route path="/" element={<HomePage overview={overview} />} />
         <Route path="/create" element={<CreatePage overview={overview} />} />
         <Route path="/create/:platform" element={<CreatePage overview={overview} />} />
@@ -116,7 +139,8 @@ export function App(): ReactNode {
         <Route path="/coming-soon" element={<ComingSoonPage overview={overview} />} />
         <Route path="/you" element={<PersonalisationPage authedFetch={authedFetch} />} />
         <Route path="*" element={<HomePage overview={overview} />} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </Shell>
   )
 }

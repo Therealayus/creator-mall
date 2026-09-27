@@ -26,7 +26,7 @@ import {
   whyForCreator,
 } from './creator.js'
 import { attachSession, authRoutes, isCsrfFailure, limiterFor, requireAuth } from './auth.js'
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { ASSET_KINDS } from '@creator-mall/core'
 import type { AssetKind } from '@creator-mall/core'
 import { forgetPreference, resetPersonalization, setPreferenceEnabled } from '@creator-mall/core'
@@ -51,6 +51,29 @@ export function createApp(context: AppContext): Express {
     }),
   )
   app.use(express.json({ limit: '256kb' }))
+
+  /**
+   * Every request gets an id, and every response echoes it.
+   *
+   * Without this, a report of "it failed at 3am" cannot be tied to a log line:
+   * there are no request ids, no timing, and no path. It is the cheapest
+   * observability there is.
+   */
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    const incoming = request.header('x-request-id')
+    const requestId = incoming && incoming.length <= 64 ? incoming : `req_${randomUUID()}`
+    response.setHeader('x-request-id', requestId)
+    const startedAt = Date.now()
+    response.on('finish', () => {
+      const ms = Date.now() - startedAt
+      // Only slow or failed requests are logged, so the signal is not drowned.
+      if (response.statusCode >= 400 || ms > 1000) {
+        console.log(`[api] ${request.method} ${request.path} ${response.statusCode} ${ms}ms ${requestId}`)
+      }
+    })
+    next()
+  })
+
   // Identity first: every later guard can rely on request.account / request.session.
   app.use(attachSession(context))
   app.use('/api/auth', authRoutes(context))
@@ -61,17 +84,41 @@ export function createApp(context: AppContext): Express {
 
   app.get('/api/health', (_request, response) => {
     const { control } = context
+    const lastRun = control.listJobRuns(1)[0]
     const report = buildHealthReport({
       sources: control.listSources(),
       currentVersions: control.currentKnowledgeVersions(),
       events: control.listEvents(),
       proposals: control.listProposals(),
-      lastRun: control.listJobRuns(1)[0]
-        ? { status: control.listJobRuns(1)[0]!.status, at: control.listJobRuns(1)[0]!.finishedAt }
+      lastRun: lastRun ? { status: lastRun.status, at: lastRun.finishedAt } : null,
+      integrationHealth: {},
+    })
+    // Liveness: the process is up and serving. Deliberately 200 even when
+    // degraded — a flaky source must not get a healthy container killed.
+    response.json({ status: 'ok', startedAt: context.startedAt, health: report })
+  })
+
+  /**
+   * Readiness: should this instance receive traffic?
+   *
+   * Separate from liveness on purpose. A load balancer should stop sending
+   * requests to an instance that cannot serve them, but it must not restart a
+   * process that is running perfectly well.
+   */
+  app.get('/api/ready', (_request, response) => {
+    const report = buildHealthReport({
+      sources: context.control.listSources(),
+      currentVersions: context.control.currentKnowledgeVersions(),
+      events: context.control.listEvents(),
+      proposals: context.control.listProposals(),
+      lastRun: context.control.listJobRuns(1)[0]
+        ? { status: context.control.listJobRuns(1)[0]!.status, at: context.control.listJobRuns(1)[0]!.finishedAt }
         : null,
       integrationHealth: {},
     })
-    response.json({ status: 'ok', startedAt: context.startedAt, health: report })
+    response
+      .status(report.overall === 'HEALTHY' ? 200 : 503)
+      .json({ status: report.overall === 'HEALTHY' ? 'ready' : 'degraded', overall: report.overall })
   })
 
   app.get('/api/platforms', (_request, response) => {
@@ -177,7 +224,7 @@ export function createApp(context: AppContext): Express {
     })
   })
 
-  const activationSchema = z.object({
+  const activationSchema = z.strictObject({
   /**
    * A person may overrule a failed or incomplete run, but the override is
    * recorded as an override, never as a pass.
@@ -186,7 +233,7 @@ export function createApp(context: AppContext): Express {
   actor: z.string().min(1).max(120).default('admin'),
 })
 
-const decisionSchema = z.object({
+const decisionSchema = z.strictObject({
     decision: z.enum(['approve', 'reject']),
     actor: z.string().min(1).max(120).default('admin'),
     note: z.string().max(2000).nullish(),
@@ -741,7 +788,26 @@ function mountWebApp(app: Express): void {
   const indexFile = resolve(dist, 'index.html')
   if (!existsSync(indexFile)) return
 
-  app.use(express.static(dist, { index: false, maxAge: '1h' }))
+  // A source map is a full copy of the application source, and it was being
+  // served to anyone who asked. `setHeaders` is the only reliable way to refuse
+  // it; `maxAge` alone does not.
+  app.use(
+    express.static(dist, {
+      index: false,
+      maxAge: '1h',
+      setHeaders: (response, filePath) => {
+        if (filePath.endsWith('.map')) {
+          response.status(404)
+          response.end()
+          return
+        }
+        if (/\.[0-9a-f]{8,}\./.test(filePath)) {
+          // Hashed filenames, so the contents can never change under a URL.
+          response.setHeader('cache-control', 'public, max-age=31536000, immutable')
+        }
+      },
+    }),
+  )
   app.get(/^\/(?!api\/|evolution-center).*/, (_request, response) => {
     response.sendFile(indexFile)
   })

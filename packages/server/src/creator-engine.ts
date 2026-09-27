@@ -173,7 +173,7 @@ function titleFor(brief: string, fallback: string): string {
   return cleaned.length <= 80 ? cleaned : `${cleaned.slice(0, 79)}…`
 }
 
-export const generationRequestSchema = z.object({
+export const generationRequestSchema = z.strictObject({
   platform: z.string().min(1).max(60),
   option: z.string().min(1).max(80),
   brief: z.string().max(600).default(''),

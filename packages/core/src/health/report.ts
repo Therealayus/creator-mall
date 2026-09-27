@@ -143,6 +143,10 @@ function overallStatus(components: ReadonlyArray<ComponentHealth>): HealthStatus
   if (components.some((component) => component.status === 'FAILING')) return 'DEGRADED'
   if (components.some((component) => component.status === 'STALE' || component.status === 'DEGRADED')) return 'DEGRADED'
   if (components.every((component) => component.status === 'HEALTHY')) return 'HEALTHY'
+  // Absence of evidence is not evidence of health: a system where nothing has
+  // ever been measured must not report a clean bill. A mix of healthy and
+  // merely-unconfigured components is still healthy.
+  if (components.every((component) => component.status === 'UNKNOWN')) return 'DEGRADED'
   return 'HEALTHY'
 }
 

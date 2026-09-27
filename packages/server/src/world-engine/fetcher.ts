@@ -188,7 +188,9 @@ export class PublicFetcher {
         }
       }
 
-      const body = await readCapped(response, request.maxBytes)
+      // The signal is still armed here: the headers arrived, but a server that
+      // then stalls would otherwise hold the cycle open indefinitely.
+      const body = await readCapped(response, request.maxBytes, request.timeoutMs)
       return {
         status: 'OK',
         url,
@@ -232,9 +234,18 @@ export class PublicFetcher {
     if (cached && Date.now() - new Date(cached.fetchedAt).getTime() < 3_600_000) return cached
 
     try {
-      const response = await this.fetchImpl(`https://${host}/robots.txt`, {
-        headers: { 'user-agent': this.config.FETCH_USER_AGENT },
-      })
+      // Bounded, or one unresponsive host stalls the whole cycle.
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), this.config.FETCH_TIMEOUT_MS)
+      let response: Response
+      try {
+        response = await this.fetchImpl(`https://${host}/robots.txt`, {
+          headers: { 'user-agent': this.config.FETCH_USER_AGENT },
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
       if (!response.ok) {
         this.robots.set(host, { disallow: [], allow: [], fetchedAt: new Date().toISOString() })
         return this.robots.get(host) ?? null
@@ -301,18 +312,35 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-async function readCapped(response: Response, maxBytes: number): Promise<string> {
+/**
+ * Reads at most `maxBytes`, and gives up if the stream stalls.
+ *
+ * Without the deadline, a server that sends headers and then never sends a body
+ * hangs the research cycle forever, and the scheduler's "already running" guard
+ * means the World Engine never runs again.
+ */
+async function readCapped(response: Response, maxBytes: number, timeoutMs = 15_000): Promise<string> {
   const reader: ReadableStreamDefaultReader<Uint8Array> | null = response.body?.getReader() ?? null
   if (!reader) return ''
   const chunks: Uint8Array[] = []
   let total = 0
   while (total < maxBytes) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value) {
-      chunks.push(value)
-      total += value.byteLength
+    const next = reader.read()
+    const raced = await Promise.race([
+      next,
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), timeoutMs).unref()
+      }),
+    ])
+    if (raced === null) {
+      await reader.cancel().catch(() => undefined)
+      throw new Error(`response body stalled for more than ${timeoutMs}ms`)
     }
+    const { done, value } = raced
+    if (done) break
+    if (!value) continue
+    chunks.push(value)
+    total += value.byteLength
   }
   await reader.cancel().catch(() => undefined)
   const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))

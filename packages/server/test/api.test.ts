@@ -44,7 +44,9 @@ describe('control plane api', () => {
     const server = await startServer(context)
     try {
       const health = await server.get('/api/health')
-      assert.equal(health.status, 200)
+      // A world built from scripted sources is healthy; a world that measured
+      // nothing is not, and says so with a 503 rather than a false "ok".
+      assert.equal(health.status, 200, health.body)
       const healthBody = JSON.parse(health.body)
       assert.equal(healthBody.status, 'ok')
       assert.ok(healthBody.health.components.length > 0)
