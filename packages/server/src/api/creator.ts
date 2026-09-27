@@ -262,12 +262,7 @@ export async function validateForCreator(
   }
 
   const snapshot = context.control.latestSnapshot(platform.id)
-  const adapter = context.adapters.resolve(
-    platform.slug,
-    snapshot?.state ?? null,
-    `${platform.name} has no verified integration yet.`,
-    platform.capabilityKeys,
-  )
+  const adapter = context.adapters.resolve(platform.slug, snapshot?.state ?? null, platform.capabilityKeys)
   const result = await adapter.validateContent({
     contentType: input.optionKey,
     text: input.text,

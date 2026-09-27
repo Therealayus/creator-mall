@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { nowIso, stableId } from '@creator-mall/core'
 import type { CreatorProfile } from '@creator-mall/core'
-import { UnavailablePlatformAdapter, AdapterRegistry } from '../src/adapters/registry.js'
+import { SimulatedPlatformAdapter, AdapterRegistry } from '../src/adapters/registry.js'
 import { runResearchCycle } from '../src/world-engine/pipeline.js'
 import { CLOCK, forkContext, platformRoutes, startServer, testContext } from './helpers.js'
 
@@ -198,20 +198,17 @@ describe('control plane api', () => {
 })
 
 describe('platform adapters', () => {
-  it('represents an unknown platform honestly instead of pretending to publish', async () => {
-    const adapter = new UnavailablePlatformAdapter('newthing', null, 'no API yet')
-    assert.equal(adapter.kind, 'UNAVAILABLE')
+  it('never lets an unknown platform look like a real integration', async () => {
+    const adapter = new SimulatedPlatformAdapter('newthing', null)
+    assert.equal(adapter.kind, 'SIMULATED', 'an unknown platform is simulated, never live')
 
     const validation = await adapter.validateContent({ contentType: 'SHORT_VIDEO', mediaRefs: [] })
-    assert.equal(validation.valid, false)
+    assert.equal(validation.valid, false, 'it refuses content the platform has not confirmed it supports')
     assert.match(validation.issues[0]!.message, /not confirmed/)
 
-    const published = await adapter.publish({ contentType: 'TEXT_POST', mediaRefs: [], accountRef: 'a1', idempotencyKey: 'k' })
+    const published = await adapter.publish({ contentType: 'SHORT_VIDEO', mediaRefs: [], accountRef: 'a1', idempotencyKey: 'k' })
     assert.equal(published.ok, false)
-    assert.match(String(published.error), /not connected/i)
-
-    const analytics = await adapter.fetchAnalytics({ accountRef: 'a1', since: 'x', until: 'y' })
-    assert.equal(analytics.ok, false)
+    assert.equal(published.simulated, true, 'a simulated result can never be read as a real publish')
   })
 
   it('validates against known limits when a snapshot exists', async () => {
@@ -229,15 +226,17 @@ describe('platform adapters', () => {
       policies: [],
       notes: [],
     }
-    const adapter = new UnavailablePlatformAdapter('newthing', state, 'no API yet')
+    const adapter = new SimulatedPlatformAdapter('newthing', state)
     const validation = await adapter.validateContent({ contentType: 'TEXT_POST', text: 'a'.repeat(200), mediaRefs: [] })
     assert.equal(validation.valid, false)
     assert.ok(validation.issues.some((issue) => issue.path === 'limits.text.maxCharacters'))
   })
 
-  it('resolves unknown platforms to the unavailable adapter', () => {
+  it('resolves unknown platforms to a simulated adapter, never a live one', () => {
     const registry = new AdapterRegistry()
     assert.equal(registry.get('unknown'), undefined)
-    assert.equal(registry.resolve('unknown', null).kind, 'UNAVAILABLE')
+    const resolved = registry.resolve('unknown', null)
+    assert.equal(resolved.kind, 'SIMULATED')
+    assert.equal(registry.byKind('LIVE').length, 0)
   })
 })

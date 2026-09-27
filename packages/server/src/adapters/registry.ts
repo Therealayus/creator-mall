@@ -1,154 +1,18 @@
-import type {
-  AdapterAnalyticsInput,
-  AdapterAnalyticsResult,
-  AdapterCapability,
-  AdapterContentInput,
-  AdapterEngagementResult,
-  AdapterPublishInput,
-  AdapterPublishResult,
-  AdapterScheduleResult,
-  AdapterValidationResult,
-  PlatformAdapter,
-  PlatformState,
-} from '@creator-mall/core'
-import { buildReadinessProfile, canEnablePublishing } from '@creator-mall/core'
+import type { PlatformAdapter, PlatformState } from '@creator-mall/core'
+import { HttpPlatformAdapter } from './http-adapter.js'
+import type { HttpAdapterDefinition } from './http-adapter.js'
+import { SimulatedPlatformAdapter } from './simulated.js'
 import type { ControlPlane } from '../store/control-plane.js'
 
-/**
- * §42: a platform nobody has integrated yet still exists in the product.
- *
- * This adapter is the honest representation of that state: it reports the
- * capabilities we know about, validates against known limits, and refuses to
- * publish with a clear explanation instead of pretending to work.
- */
-export class UnavailablePlatformAdapter implements PlatformAdapter {
-  readonly kind = 'UNAVAILABLE' as const
-  readonly platformSlug: string
-  private readonly state: PlatformState | null
-  private readonly reason: string
-  private readonly declared: ReadonlySet<string>
-
-  constructor(platformSlug: string, state: PlatformState | null, reason: string, declaredCapabilityKeys: readonly string[] = []) {
-    this.platformSlug = platformSlug
-    this.state = state
-    this.reason = reason
-    this.declared = new Set(declaredCapabilityKeys)
-  }
-
-  getCapabilities(): Promise<AdapterCapability[]> {
-    const observed = new Map(
-      Object.values(this.state?.capabilities ?? {}).map((observation) => [observation.capabilityKey, observation]),
-    )
-    for (const key of this.declared) {
-      if (!observed.has(key)) {
-        observed.set(key, { capabilityKey: key, state: 'ACTIVE', confidence: 0, sourceIds: [] })
-      }
-    }
-    return Promise.resolve(
-      [...observed.values()].map((observation) => ({
-        key: observation.capabilityKey,
-        state: observation.state,
-        constraints: (observation.constraints ?? {}) as Record<string, never>,
-      })),
-    )
-  }
-
-  validateContent(input: AdapterContentInput): Promise<AdapterValidationResult> {
-    const issues: AdapterValidationResult['issues'] = []
-    const key = input.contentType.toUpperCase()
-    const observation = this.state?.capabilities[key]
-    const supported = Boolean(observation) || this.declared.has(key)
-
-    if (!supported) {
-      issues.push({
-        path: 'contentType',
-        message: `${this.platformSlug} support for "${input.contentType}" is not confirmed yet.`,
-        severity: 'ERROR',
-        sourceId: null,
-      })
-      return Promise.resolve({ valid: false, issues })
-    }
-
-    if (observation?.state === 'DEPRECATED' || observation?.state === 'REMOVED') {
-      issues.push({
-        path: 'contentType',
-        message: `${this.platformSlug} no longer supports "${input.contentType}".`,
-        severity: 'ERROR',
-        sourceId: observation.sourceIds[0] ?? null,
-      })
-    }
-
-    for (const limit of numericLimits(this.state?.limits ?? {})) {
-      if (/character/i.test(limit.path)) {
-        const length = input.text?.length ?? 0
-        if (length > limit.value) {
-          issues.push({
-            path: limit.path,
-            message: `This post is ${length} characters; ${this.platformSlug} allows ${limit.value}.`,
-            severity: 'ERROR',
-            sourceId: observation?.sourceIds[0] ?? null,
-          })
-        }
-      }
-      if (/hashtag/i.test(limit.path)) {
-        const hashtags = (input.text?.match(/#\w+/g) ?? []).length
-        if (hashtags > limit.value) {
-          issues.push({
-            path: limit.path,
-            message: `This post uses ${hashtags} hashtags; ${this.platformSlug} allows ${limit.value}.`,
-            severity: 'ERROR',
-            sourceId: observation?.sourceIds[0] ?? null,
-          })
-        }
-      }
-      if (/maximages/i.test(limit.path) && input.mediaRefs.length > limit.value) {
-        issues.push({
-          path: limit.path,
-          message: `This post has ${input.mediaRefs.length} media files; ${this.platformSlug} allows ${limit.value}.`,
-          severity: 'ERROR',
-          sourceId: observation?.sourceIds[0] ?? null,
-        })
-      }
-    }
-
-    return Promise.resolve({ valid: issues.every((issue) => issue.severity !== 'ERROR'), issues })
-  }
-
-  publish(_input: AdapterPublishInput): Promise<AdapterPublishResult> {
-    return Promise.resolve({
-      ok: false,
-      platformContentRef: null,
-      error: `Publishing to ${this.platformSlug} is not connected yet. ${this.reason}`,
-    })
-  }
-
-  async schedule(input: AdapterPublishInput): Promise<AdapterScheduleResult> {
-    const result = await this.publish(input)
-    return { ...result, scheduledAt: null }
-  }
-
-  fetchAnalytics(_input: AdapterAnalyticsInput): Promise<AdapterAnalyticsResult> {
-    return Promise.resolve({
-      ok: false,
-      metrics: [],
-      error: `Analytics for ${this.platformSlug} are not connected yet.`,
-    })
-  }
-
-  fetchEngagement(_input: AdapterAnalyticsInput): Promise<AdapterEngagementResult> {
-    return Promise.resolve({
-      ok: false,
-      comments: 0,
-      replies: 0,
-      messages: 0,
-      error: `Engagement data for ${this.platformSlug} is not connected yet.`,
-    })
-  }
-}
+export { SimulatedPlatformAdapter } from './simulated.js'
+export { CredentialMissing, HttpPlatformAdapter, readPath } from './http-adapter.js'
+export type { HttpAdapterDefinition } from './http-adapter.js'
+export { validationIssues } from './validation.js'
 
 /**
- * §41: adapters are registered by capability contract, not by platform name in
- * application code. Adding an integration means registering an adapter here.
+ * §41: adapters are registered by contract, not by platform name in
+ * application code. Adding an integration means supplying a verified
+ * definition; adding a platform means nothing at all.
  */
 export class AdapterRegistry {
   private readonly adapters = new Map<string, PlatformAdapter>()
@@ -163,61 +27,107 @@ export class AdapterRegistry {
   }
 
   /**
-   * Never returns null: unknown platforms resolve to the unavailable adapter so
-   * callers cannot accidentally treat "no adapter" as "no platform".
+   * Never returns null: an unknown platform resolves to the simulated adapter,
+   * so "no adapter" can never be mistaken for "no platform", and local
+   * development exercises the same code path production will.
    */
   resolve(
     platformSlug: string,
     state: PlatformState | null,
-    reason = 'No verified integration exists yet.',
     declaredCapabilityKeys: readonly string[] = [],
   ): PlatformAdapter {
-    return (
-      this.adapters.get(platformSlug) ??
-      new UnavailablePlatformAdapter(platformSlug, state, reason, declaredCapabilityKeys)
-    )
+    return this.adapters.get(platformSlug) ?? new SimulatedPlatformAdapter(platformSlug, state, declaredCapabilityKeys)
   }
 
   list(): PlatformAdapter[] {
     return [...this.adapters.values()]
   }
-}
 
-/** Flattens the nested limits object into checkable `path → number` pairs. */
-function numericLimits(limits: Record<string, unknown>, prefix = 'limits'): Array<{ path: string; value: number }> {
-  const result: Array<{ path: string; value: number }> = []
-  for (const [key, value] of Object.entries(limits)) {
-    const path = `${prefix}.${key}`
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      result.push({ path, value })
-      continue
-    }
-    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      result.push(...numericLimits(value as Record<string, unknown>, path))
-    }
+  byKind(kind: PlatformAdapter['kind']): PlatformAdapter[] {
+    return this.list().filter((adapter) => adapter.kind === kind)
   }
-  return result
 }
 
-export function buildRegistryFor(control: ControlPlane): AdapterRegistry {
+export interface CredentialResolver {
+  (platformSlug: string, accountRef: string): string | null
+}
+
+export interface BuildRegistryOptions {
+  /** Verified integration definitions, keyed by platform slug. */
+  definitions?: readonly HttpAdapterDefinition[]
+  credentialFor?: CredentialResolver
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * Builds the registry from verified knowledge.
+ *
+ * A platform becomes `LIVE` only when a definition exists that names a real
+ * endpoint. Everything else is `SIMULATED`, which is honest about what can
+ * actually publish.
+ */
+export function buildAdapterRegistry(options: BuildRegistryOptions = {}): AdapterRegistry {
   const registry = new AdapterRegistry()
-  for (const platform of control.listPlatforms()) {
-    const snapshot = control.latestSnapshot(platform.id)
-    registry.resolve(platform.slug, snapshot?.state ?? null, `${platform.name} has no verified integration yet.`)
+
+  for (const definition of options.definitions ?? []) {
+    if (!definition.baseUrl || !definition.publish?.path) continue
+    registry.register(
+      new HttpPlatformAdapter({
+        definition,
+        state: null,
+        declaredCapabilityKeys: [],
+        credentialFor: (accountRef) => options.credentialFor?.(definition.platformSlug, accountRef) ?? null,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      }),
+    )
   }
   return registry
 }
 
+/**
+ * Wires adapters against live control-plane state so validation always checks
+ * the newest verified limits, not the snapshot the adapter was built with.
+ */
+export function attachRegistryToControlPlane(control: ControlPlane, registry: AdapterRegistry): AdapterRegistry {
+  for (const platform of control.listPlatforms()) {
+    const snapshot = control.latestSnapshot(platform.id)
+    const state = snapshot?.state ?? null
+    const existing = registry.get(platform.slug)
+
+    if (existing instanceof HttpPlatformAdapter) {
+      registry.register(
+        new HttpPlatformAdapter({
+          definition: existing.definition,
+          state,
+          declaredCapabilityKeys: platform.capabilityKeys,
+          credentialFor: existing.credentialResolver,
+          ...(existing.fetchImplementation ? { fetchImpl: existing.fetchImplementation } : {}),
+        }),
+      )
+      continue
+    }
+    registry.resolve(platform.slug, state, platform.capabilityKeys)
+  }
+  return registry
+}
+
+/**
+ * A platform can publish only when a live integration exists *and* our own
+ * verified knowledge says the publishing API is there. Two independent checks,
+ * because being wrong in either direction is expensive.
+ */
 export function publishingEnabled(control: ControlPlane, registry: AdapterRegistry, platformId: string): boolean {
   const platform = control.getPlatform(platformId)
   if (!platform) return false
-  const profile = buildReadinessProfile({
-    platform,
-    capabilities: control.capabilities.all(),
-    adapter: registry.get(platform.slug) ?? null,
-    hasApiSource: control.sourcesForPlatform(platform.slug).some((source) => source.sourceType === 'DEVELOPER'),
-    hasOfficialSource: control.sourcesForPlatform(platform.slug).some((source) => source.sourceType === 'OFFICIAL'),
-    templatesPrepared: control.listTemplates(platform.id).length,
-  })
-  return canEnablePublishing(profile, registry.get(platform.slug) ?? null)
+
+  const adapter = registry.get(platform.slug)
+  if (!adapter || adapter.kind !== 'LIVE') return false
+
+  const state = control.latestSnapshot(platform.id)?.state
+  if (state?.capabilities.API_PUBLISH?.state !== 'ACTIVE') return false
+  return Boolean(state?.api?.contentPublishing)
+}
+
+export function adapterSummary(registry: AdapterRegistry): Array<{ slug: string; kind: string }> {
+  return registry.list().map((adapter) => ({ slug: adapter.platformSlug, kind: adapter.kind }))
 }

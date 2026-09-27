@@ -2,8 +2,9 @@ import type { Config } from './config.js'
 import { loadConfig } from './config.js'
 import { ModelFactExtractor } from '@creator-mall/core'
 import type { CreatorProfile, FactExtractor, SocialPlatform } from '@creator-mall/core'
-import { AdapterRegistry } from './adapters/registry.js'
-import { isModelConfigured, OpenRouterClient } from './ai/openrouter.js'
+import { attachRegistryToControlPlane, buildAdapterRegistry } from './adapters/registry.js'
+import type { AdapterRegistry, HttpAdapterDefinition } from './adapters/registry.js'
+import { isModelConfigured, OpenRouterClient, redactSecrets } from './ai/openrouter.js'
 import { ControlPlane } from './store/control-plane.js'
 import { FilePersistence } from './store/file-persistence.js'
 import { PostgresPersistence } from './store/postgres-persistence.js'
@@ -49,7 +50,12 @@ export async function createContext(
   if (deps.seed !== false) seedControlPlane(control)
 
   const fetcher = new PublicFetcher(config, deps.fetchImpl ?? fetch)
-  const adapters = new AdapterRegistry()
+  const adapters = buildAdapterRegistry({
+    definitions: loadIntegrationDefinitions(),
+    credentialFor: (platformSlug, accountRef) => credentialResolver(platformSlug, accountRef),
+    ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+  })
+  attachRegistryToControlPlane(control, adapters)
 
   return {
     config,
@@ -88,6 +94,40 @@ function createModelExtractor(config: Config): FactExtractor | null {
   })
 
   return new ModelFactExtractor({ client, maxInputChars: config.MODEL_MAX_INPUT_CHARS })
+}
+
+/**
+ * Verified integration definitions.
+ *
+ * Phase 4 ships the *mechanism*: a definition turns a platform into a live
+ * integration. No platform is claimed here, because no platform's publishing API
+ * has been verified from this environment. Add a definition once its API is
+ * confirmed, and publishing turns on automatically.
+ */
+function loadIntegrationDefinitions(): HttpAdapterDefinition[] {
+  const raw = process.env.CM_INTEGRATIONS
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as HttpAdapterDefinition[]) : []
+  } catch (error) {
+    console.warn(
+      `[creator-mall] CM_INTEGRATIONS is not valid JSON, ignoring: ${redactSecrets(
+        error instanceof Error ? error.message : 'unknown',
+      )}`,
+    )
+    return []
+  }
+}
+
+/**
+ * Credentials are read at call time from the environment, per platform and per
+ * account, and are never written to the control plane.
+ */
+function credentialResolver(platformSlug: string, accountRef: string): string | null {
+  const specific = process.env[`CM_CREDENTIAL_${platformSlug.toUpperCase()}_${accountRef}`]
+  if (specific) return specific
+  return process.env[`CM_CREDENTIAL_${platformSlug.toUpperCase()}`] ?? null
 }
 
 /**

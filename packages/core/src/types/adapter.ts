@@ -52,6 +52,11 @@ export interface AdapterPublishResult {
   ok: boolean
   platformContentRef: string | null
   error: string | null
+  /**
+   * True when the result came from a simulated adapter. A caller must never
+   * present this to a creator as a real publish.
+   */
+  simulated?: boolean
 }
 
 export interface AdapterScheduleResult extends AdapterPublishResult {
