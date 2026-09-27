@@ -55,9 +55,9 @@ describe('html reading', () => {
 describe('fact extraction', () => {
   const extractor = new HeuristicFactExtractor()
 
-  it('extracts numeric limits with their evidence sentence', () => {
+  it('extracts numeric limits with their evidence sentence', async () => {
     const text = 'Reels can be up to 90 seconds long. Posts can be up to 2,200 characters including hashtags.'
-    const facts = extractor.extract({
+    const facts = await extractor.extract({
       platformId: 'pf_1',
       platformName: 'Example',
       text,
@@ -73,8 +73,8 @@ describe('fact extraction', () => {
     assert.equal(characters?.value, 2200)
   })
 
-  it('converts minutes to seconds', () => {
-    const facts = extractor.extract({
+  it('converts minutes to seconds', async () => {
+    const facts = await extractor.extract({
       platformId: 'pf_1',
       platformName: 'Example',
       text: 'Videos may be up to 3 minutes long for most creators today.',
@@ -84,8 +84,8 @@ describe('fact extraction', () => {
     assert.equal(facts.find((fact) => fact.path === 'limits.video.maxDurationSeconds')?.value, 180)
   })
 
-  it('flags deprecation sentences', () => {
-    const facts = extractor.extract({
+  it('flags deprecation sentences', async () => {
+    const facts = await extractor.extract({
       platformId: 'pf_1',
       platformName: 'Example',
       text: 'The content publishing API version 1 is deprecated and will be removed in 2027.',
@@ -95,8 +95,8 @@ describe('fact extraction', () => {
     assert.ok(facts.some((fact) => fact.category === 'API_DEPRECATION'))
   })
 
-  it('detects a newly launched format as a capability signal', () => {
-    const facts = extractor.extract({
+  it('detects a newly launched format as a capability signal', async () => {
+    const facts = await extractor.extract({
       platformId: 'pf_1',
       platformName: 'Example',
       text: 'We are rolling out a new vertical reels format for all creators this month.',
@@ -107,7 +107,7 @@ describe('fact extraction', () => {
     assert.equal(capability?.path, 'capabilities.SHORT_VIDEO')
   })
 
-  it('never turns page furniture into a platform fact', () => {
+  it('never turns page furniture into a platform fact', async () => {
     const noise = [
       'This browser is no longer supported. Please upgrade to a modern browser to continue.',
       'We use cookies to personalise content and analyse traffic on this website.',
@@ -115,7 +115,7 @@ describe('fact extraction', () => {
       'All rights reserved. Creator Mall is a trademark of Example Inc.',
     ]
     for (const text of noise) {
-      const facts = extractor.extract({
+      const facts = await extractor.extract({
         platformId: 'pf_1',
         platformName: 'Example',
         text,
@@ -166,8 +166,8 @@ describe('verification gate', () => {
   const extractor = new HeuristicFactExtractor()
   const text = 'Reels can be up to 90 seconds long in our current documentation.'
 
-  const facts = (sourceId: string) =>
-    extractor.extract({
+  const facts = async (sourceId: string) =>
+    await extractor.extract({
       platformId: 'pf_1',
       platformName: 'Example',
       text,
@@ -175,28 +175,28 @@ describe('verification gate', () => {
       capabilityRegistry: registry,
     })
 
-  it('accepts a claim backed by official documentation', () => {
+  it('accepts a claim backed by official documentation', async () => {
     const sources = [source({ id: 'src_official', sourceType: 'DOCUMENTATION', trustLevel: 'OFFICIAL', domain: 'creators.example.com' })]
-    const claims = verifyFacts(facts('src_official'), sources)
+    const claims = verifyFacts(await facts('src_official'), sources)
     const limit = claims.find((claim) => claim.path === 'limits.video.maxDurationSeconds')
     assert.equal(limit?.status, 'ACCEPTED')
     assert.equal(limit?.trustLevel, 'OFFICIAL')
   })
 
-  it('keeps a community-only claim out of knowledge', () => {
+  it('keeps a community-only claim out of knowledge', async () => {
     const sources = [source({ id: 'src_forum', sourceType: 'COMMUNITY', trustLevel: 'COMMUNITY_SIGNAL', domain: 'forum.example' })]
-    const claims = verifyFacts(facts('src_forum'), sources)
+    const claims = verifyFacts(await facts('src_forum'), sources)
     const limit = claims.find((claim) => claim.path === 'limits.video.maxDurationSeconds')
     assert.equal(limit?.status, 'REJECTED')
     assert.equal(limit?.trustLevel, 'COMMUNITY_SIGNAL')
   })
 
-  it('downgrades hearsay wording even on an official page', () => {
+  it('downgrades hearsay wording even on an official page', async () => {
     assert.equal(detectRumour('It is rumoured that the API will be removed soon'), true)
     assert.equal(detectRumour('The API is removed as of March 2027'), false)
 
     const sources = [source({ id: 'src_official', sourceType: 'OFFICIAL', trustLevel: 'OFFICIAL', domain: 'creators.example.com' })]
-    const rumoured = extractor.extract({
+    const rumoured = await extractor.extract({
       platformId: 'pf_1',
       platformName: 'Example',
       text: 'Sources say the old publishing endpoint is deprecated and will be removed next year.',
@@ -207,12 +207,12 @@ describe('verification gate', () => {
     assert.ok(claims.every((claim) => claim.trustLevel === 'RUMOR' || claim.status === 'REJECTED'))
   })
 
-  it('corroborates the same claim across two sources', () => {
+  it('corroborates the same claim across two sources', async () => {
     const sources = [
       source({ id: 'src_a', sourceType: 'DOCUMENTATION', trustLevel: 'OFFICIAL', domain: 'creators.example.com' }),
       source({ id: 'src_b', sourceType: 'DEVELOPER', trustLevel: 'OFFICIAL', domain: 'developers.example.com' }),
     ]
-    const claims = verifyFacts([...facts('src_a'), ...facts('src_b')], sources)
+    const claims = verifyFacts([...(await facts('src_a')), ...(await facts('src_b'))], sources)
     const limit = claims.find((claim) => claim.path === 'limits.video.maxDurationSeconds')
     assert.equal(limit?.sourceIds.length, 2)
   })

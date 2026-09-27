@@ -19,7 +19,12 @@ async function main(): Promise<void> {
   let scheduler: ResearchScheduler | null = null
   if (context.config.RESEARCH_ENABLED) {
     scheduler = new ResearchScheduler(
-      { control: context.control, fetcher: context.fetcher },
+      {
+        control: context.control,
+        fetcher: context.fetcher,
+        modelExtractor: context.modelExtractor,
+        onModelFallback: (reason) => console.log(`[world-engine] model extraction skipped: ${reason}`),
+      },
       {
         intervalMs: context.config.RESEARCH_INTERVAL_MS,
         logger: (message, payload) => console.log(`[world-engine] ${message}`, payload ?? ''),

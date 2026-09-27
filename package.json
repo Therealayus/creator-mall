@@ -25,6 +25,7 @@
     "start": "node packages/server/dist/index.js",
     "seed": "npm run seed --workspace @creator-mall/server",
     "engine:once": "npm run engine:once --workspace @creator-mall/server",
+    "model:check": "npm run build --workspace @creator-mall/core && npm run build --workspace @creator-mall/server && node scripts/check-model.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test"
   },
   "devDependencies": {

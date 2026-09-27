@@ -1,49 +1,4 @@
-import type { ChangeCategory } from '../types/enums.js'
-import type { JsonValue } from '../types/platform.js'
-import type { CapabilityRegistry } from '../capabilities/registry.js'
-
-/**
- * A candidate claim extracted from a page. Extraction is pluggable: the shipped
- * implementation is deterministic and offline, and a model-backed extractor can
- * be dropped in behind the same interface (§48 controlled autonomy).
- */
-export interface ExtractedFact {
-  /** Stable claim key, e.g. "instagram:limits.video.maxDurationSeconds". */
-  key: string
-  statement: string
-  value: JsonValue
-  path: string
-  category: ChangeCategory
-  evidence: string
-  confidence: number
-  capabilityKeys: string[]
-  /** The source this observation came from; verification groups by source. */
-  sourceId: string
-}
-
-export interface FactExtractor {
-  readonly name: string
-  extract(input: ExtractInput): ExtractedFact[]
-}
-
-export interface ExtractInput {
-  platformId: string
-  platformName: string
-  text: string
-  sourceId: string
-  capabilityRegistry: CapabilityRegistry
-}
-
-interface Rule {
-  path: string
-  category: ChangeCategory
-  patterns: RegExp[]
-  value: (match: RegExpExecArray) => number
-  statement: (value: number) => string
-  capabilityKeys?: string[]
-  /** Human phrasing per value, for the fact statement. */
-  unit?: string
-}
+import type { ExtractedFact, ExtractInput, FactExtractor, Rule } from './contract.js'
 
 const UP_TO = '(?:up to|maximum of|max(?:imum)?(?: of)?|limit(?:ed)? to|no more than)'
 
@@ -167,7 +122,7 @@ interface Sentence {
 export class HeuristicFactExtractor implements FactExtractor {
   readonly name = 'heuristic-v1'
 
-  extract(input: ExtractInput): ExtractedFact[] {
+  extract(input: ExtractInput): Promise<ExtractedFact[]> {
     const facts: ExtractedFact[] = []
     const sentences = splitSentences(input.text)
     const consumed = new Set<string>()
@@ -240,7 +195,7 @@ export class HeuristicFactExtractor implements FactExtractor {
       })
     }
 
-    return facts
+    return Promise.resolve(facts)
   }
 }
 

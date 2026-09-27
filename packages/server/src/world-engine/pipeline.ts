@@ -29,6 +29,7 @@ import type {
   StateDelta,
   VerifiedClaim,
 } from '@creator-mall/core'
+import type { FactExtractor } from '@creator-mall/core'
 import type { ControlPlane } from '../store/control-plane.js'
 import type { PublicFetcher } from './fetcher.js'
 import { applyClaims } from './state-builder.js'
@@ -41,10 +42,20 @@ export interface ResearchDeps {
   /** Only research sources that are due. */
   respectSchedule?: boolean
   maxSourcesPerRun?: number
+  /**
+   * Optional model-backed extractor. When present it is tried first and the
+   * deterministic extractor is used for anything it cannot handle, so a provider
+   * outage degrades quality instead of stopping research (§38).
+   */
+  modelExtractor?: FactExtractor | null
+  /** Called with a short, key-free reason when the model path is skipped. */
+  onModelFallback?: (reason: string) => void
 }
 
 export interface CycleResult extends ResearchJobRun {
   events: EvolutionEvent[]
+  /** Short, key-free reasons the model path was skipped this cycle. */
+  modelFallbacks: string[]
 }
 
 /**
@@ -61,7 +72,8 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
   const { control, fetcher } = deps
   const startedAt = nowIso(clock)
 
-  const extractor = new HeuristicFactExtractor()
+  const heuristic = new HeuristicFactExtractor()
+  const model = deps.modelExtractor ?? null
   const registry = control.capabilities
   const createdEvents: EvolutionEvent[] = []
   let sourcesChecked = 0
@@ -69,6 +81,7 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
   let snapshotsCreated = 0
   let proposalsCreated = 0
   let knowledgePublished = 0
+  const modelFallbacks: string[] = []
 
   // §16: before auditing known platforms, look for ones we have never heard of.
   for (const event of await discoverPlatformSignals({ control, fetcher, clock })) {
@@ -99,15 +112,31 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
           lastModified: outcome.lastModified,
         })
         const document = parseDocument(outcome.body, outcome.url, outcome.contentType, outcome.fetchedAt)
-        facts.push(
-          ...extractor.extract({
-            platformId: platform.id,
-            platformName: platform.name,
-            text: document.text,
-            sourceId: updated.id,
-            capabilityRegistry: registry,
-          }),
-        )
+        const extractInput = {
+          platformId: platform.id,
+          platformName: platform.name,
+          text: document.text,
+          sourceId: updated.id,
+          capabilityRegistry: registry,
+        }
+
+        let extracted: ExtractedFact[] = []
+        if (model) {
+          try {
+            extracted = await model.extract(extractInput)
+          } catch (error) {
+            // A provider problem is never a research problem: fall back, note it, continue.
+            const reason = error instanceof Error ? error.message : 'model extraction failed'
+            modelFallbacks.push(reason)
+            deps.onModelFallback?.(reason)
+            extracted = []
+          }
+        }
+
+        // The deterministic extractor always runs. Facts agree on `key`, so a
+        // confirmed limit is not duplicated, and a model can only add coverage.
+        extracted.push(...(await heuristic.extract(extractInput)))
+        facts.push(...dedupeFacts(extracted))
         continue
       }
 
@@ -172,10 +201,21 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     proposalsCreated,
     knowledgePublished,
     error: null,
+    modelFallbacks: [...new Set(modelFallbacks)],
     events: createdEvents,
   }
   control.addJobRun(result)
   return result
+}
+
+/** Two extractors can find the same claim; the higher-confidence one wins. */
+function dedupeFacts(facts: ReadonlyArray<ExtractedFact>): ExtractedFact[] {
+  const byKey = new Map<string, ExtractedFact>()
+  for (const fact of facts) {
+    const existing = byKey.get(fact.key)
+    if (!existing || fact.confidence > existing.confidence) byKey.set(fact.key, fact)
+  }
+  return [...byKey.values()]
 }
 
 function selectSources(sources: ReadonlyArray<Source>, now: number, respectSchedule: boolean): Source[] {

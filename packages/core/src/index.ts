@@ -24,7 +24,9 @@ export * from './diff/classify.js'
 export * from './diff/snapshot-diff.js'
 
 export * from './extract/html.js'
+export * from './extract/contract.js'
 export * from './extract/facts.js'
+export * from './extract/model.js'
 
 export * from './verify/trust.js'
 export * from './verify/verifier.js'

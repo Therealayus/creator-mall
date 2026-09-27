@@ -266,6 +266,7 @@ export function createApp(context: AppContext): Express {
         const result = await runResearchCycle({
           control: context.control,
           fetcher: context.fetcher,
+          modelExtractor: context.modelExtractor,
           respectSchedule: !body.ignoreSchedule,
           maxSourcesPerRun: body.maxSources,
         })

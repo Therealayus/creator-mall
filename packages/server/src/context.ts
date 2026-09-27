@@ -1,13 +1,15 @@
 import type { Config } from './config.js'
 import { loadConfig } from './config.js'
+import { ModelFactExtractor } from '@creator-mall/core'
+import type { CreatorProfile, FactExtractor, SocialPlatform } from '@creator-mall/core'
 import { AdapterRegistry } from './adapters/registry.js'
+import { isModelConfigured, OpenRouterClient } from './ai/openrouter.js'
 import { ControlPlane } from './store/control-plane.js'
 import { FilePersistence } from './store/file-persistence.js'
 import { MemoryPersistence } from './store/persistence.js'
 import type { ControlPlaneState, PersistencePort } from './store/persistence.js'
 import { PublicFetcher } from './world-engine/fetcher.js'
 import { SEED_PLATFORMS, seedSources } from './world-engine/seed.js'
-import type { CreatorProfile, SocialPlatform } from '@creator-mall/core'
 import { nowIso, seedTemplateFor, stableId } from '@creator-mall/core'
 
 export interface AppContext {
@@ -17,10 +19,12 @@ export interface AppContext {
   fetcher: PublicFetcher
   persistence: PersistencePort
   startedAt: string
+  /** Model-backed extractor, or null when no provider is configured. */
+  modelExtractor: FactExtractor | null
   /**
-   * Which creator the web app is acting as. Phase 2 has no accounts yet, so this
-   * is the seeded demo creator unless CREATOR_ID selects another one. Replaced by
-   * real sessions in Phase 3.
+   * Which creator the web app is acting as when no one is signed in.
+   * Phase 3 adds real accounts; this keeps local development usable without a
+   * sign-up step, and is never used once a session exists.
    */
   creatorSession: () => CreatorProfile | undefined
 }
@@ -52,6 +56,7 @@ export async function createContext(
     fetcher,
     persistence,
     startedAt: nowIso(),
+    modelExtractor: createModelExtractor(config),
     creatorSession: () => {
       if (config.CREATOR_ID) {
         const selected = control.getCreator(config.CREATOR_ID)
@@ -60,6 +65,27 @@ export async function createContext(
       return control.listCreators()[0]
     },
   }
+}
+
+/**
+ * Builds the model-backed extractor when a provider is configured.
+ *
+ * The key is read here and nowhere else. It is never logged, never returned in
+ * an API response, and never written to the control-plane snapshot.
+ */
+function createModelExtractor(config: Config): FactExtractor | null {
+  if (!config.MODEL_EXTRACTION) return null
+  if (!isModelConfigured(config.OPENROUTER_API_KEY)) return null
+
+  const client = new OpenRouterClient({
+    apiKey: config.OPENROUTER_API_KEY,
+    model: config.OPENROUTER_MODEL,
+    baseUrl: config.OPENROUTER_BASE_URL,
+    timeoutMs: config.MODEL_TIMEOUT_MS,
+    title: 'Creator Mall World Engine',
+  })
+
+  return new ModelFactExtractor({ client, maxInputChars: config.MODEL_MAX_INPUT_CHARS })
 }
 
 /** The demo creator that makes the creator-facing surface usable on first run. */

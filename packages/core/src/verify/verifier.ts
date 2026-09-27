@@ -1,4 +1,4 @@
-import type { ExtractedFact } from '../extract/facts.js'
+import type { ExtractedFact } from '../extract/contract.js'
 import type { TrustLevel } from '../types/enums.js'
 import type { Source } from '../types/source.js'
 import { assessSources } from './trust.js'

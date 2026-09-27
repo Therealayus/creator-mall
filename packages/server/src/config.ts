@@ -1,4 +1,7 @@
 /** Runtime configuration. Everything is env-driven so nothing is hardcoded. */
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { config as loadDotenv } from 'dotenv'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -36,11 +39,41 @@ const schema = z.object({
 
   /** Comma-separated hosts the World Engine is allowed to read. */
   ALLOWED_HOSTS: z.string().default(''),
+
+  /**
+   * Optional model provider for fact extraction. When no key is configured the
+   * deterministic extractor is used, so the World Engine never depends on it.
+   */
+  OPENROUTER_API_KEY: z.string().default(''),
+  OPENROUTER_MODEL: z.string().default('openrouter/stealth/space-bunny-alpha'),
+  OPENROUTER_BASE_URL: z.string().default('https://openrouter.com/api/v1'),
+  MODEL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+  MODEL_MAX_INPUT_CHARS: z.coerce.number().int().min(500).max(60_000).default(12_000),
+  /** Disable model extraction entirely even when a key is present. */
+  MODEL_EXTRACTION: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
 })
 
 export type Config = z.infer<typeof schema> & { allowedHosts: Set<string> }
 
+let dotenvLoaded = false
+
+/**
+ * Loads `.env` for local development. Real environment variables always win, so
+ * a deployment's secret store is never overridden by a file. `.env` is
+ * gitignored and must never be committed.
+ */
+function loadLocalEnvFile(): void {
+  if (dotenvLoaded) return
+  dotenvLoaded = true
+  const file = resolve(process.cwd(), '.env')
+  if (existsSync(file)) loadDotenv({ path: file, quiet: true })
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  if (env === process.env) loadLocalEnvFile()
   const parsed = schema.parse(env)
   const allowedHosts = new Set(
     parsed.ALLOWED_HOSTS.split(',')

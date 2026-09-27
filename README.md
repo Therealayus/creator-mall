@@ -158,8 +158,29 @@ See `.env.example`. Notable values:
 | `ALLOWED_HOSTS` | *(empty = all)* | comma-separated hosts the engine may read |
 | `ADMIN_TOKEN` | *(empty)* | bearer token for `/api/admin/*`; required in production |
 | `CREATOR_ID` | *(empty)* | which creator the app acts as, until real accounts exist |
+| `OPENROUTER_API_KEY` | *(empty)* | optional model for fact extraction; unset means deterministic only |
+| `OPENROUTER_MODEL` | `openrouter/stealth/space-bunny-alpha` | model id |
 | `DATA_DIR` | *(empty = memory)* | directory for the control-plane JSON snapshot |
 | `RESPECT_ROBOTS` | `true` | honour robots.txt |
+
+## The model is an assistant, not an authority
+
+With `OPENROUTER_API_KEY` set, a model runs first during fact extraction. It is treated as
+an **untrusted contributor**:
+
+- its output is parsed and validated field by field — unknown areas and categories are dropped;
+- every fact must quote the page **verbatim** or it is discarded;
+- confidences are capped at 0.8, because a model's confidence is not evidence;
+- the deterministic extractor **always** runs too, so a model can only add coverage;
+- the same verification gate decides what becomes knowledge;
+- a provider failure, timeout or outage falls back silently and the cycle continues.
+
+Keys live in `.env` (gitignored) or your deployment secret store. A test scans the repository
+and fails if a key-shaped string is ever committed, and provider errors never echo the key.
+
+```
+npm run model:check      # one-off: does the configured provider answer?
+```
 
 ## Status
 

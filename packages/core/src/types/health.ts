@@ -37,4 +37,6 @@ export interface ResearchJobRun {
   proposalsCreated: number
   knowledgePublished: number
   error: string | null
+  /** Short, key-free reasons the model extraction path was not used. */
+  modelFallbacks?: string[]
 }
