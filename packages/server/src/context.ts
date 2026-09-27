@@ -6,6 +6,7 @@ import { attachRegistryToControlPlane, buildAdapterRegistry } from './adapters/r
 import type { AdapterRegistry, HttpAdapterDefinition } from './adapters/registry.js'
 import { isModelConfigured, OpenRouterClient, redactSecrets } from './ai/openrouter.js'
 import { ControlPlane } from './store/control-plane.js'
+import { InMemoryAssetStorage, MediaLibrary } from './store/media-library.js'
 import { FilePersistence } from './store/file-persistence.js'
 import { PostgresPersistence } from './store/postgres-persistence.js'
 import { checkSchema, createPgClient } from './store/sql-migrate.js'
@@ -26,6 +27,10 @@ export interface AppContext {
   modelExtractor: FactExtractor | null
   /** Embedding provider: hosted when a key is configured, local otherwise. */
   embeddingProvider: EmbeddingProvider
+  /** Model client for copy generation, or null when no provider is configured. */
+  modelClient: OpenRouterClient | null
+  /** Generated and uploaded assets. */
+  media: MediaLibrary
   /**
    * Which creator the web app is acting as when no one is signed in.
    * Phase 3 adds real accounts; this keeps local development usable without a
@@ -68,6 +73,8 @@ export async function createContext(
     startedAt: nowIso(),
     modelExtractor: createModelExtractor(config),
     embeddingProvider: createEmbeddingProvider(config),
+    modelClient: createModelClient(config),
+    media: new MediaLibrary(new InMemoryAssetStorage()),
     creatorSession: () => {
       if (config.CREATOR_ID) {
         const selected = control.getCreator(config.CREATOR_ID)
@@ -97,6 +104,21 @@ function createModelExtractor(config: Config): FactExtractor | null {
   })
 
   return new ModelFactExtractor({ client, maxInputChars: config.MODEL_MAX_INPUT_CHARS })
+}
+
+/**
+ * The model client, when a provider key exists. Copy generation falls back to
+ * the deterministic renderer when it does not.
+ */
+function createModelClient(config: Config): OpenRouterClient | null {
+  if (!isModelConfigured(config.OPENROUTER_API_KEY)) return null
+  return new OpenRouterClient({
+    apiKey: config.OPENROUTER_API_KEY,
+    model: config.OPENROUTER_MODEL,
+    baseUrl: config.OPENROUTER_BASE_URL,
+    timeoutMs: config.MODEL_TIMEOUT_MS,
+    title: 'Creator Mall Creator Engine',
+  })
 }
 
 /**

@@ -25,7 +25,10 @@ import {
   whyForCreator,
 } from './creator.js'
 import { attachSession, authRoutes, requireAuth } from './auth.js'
+import { ASSET_KINDS } from '@creator-mall/core'
+import type { AssetKind } from '@creator-mall/core'
 import { forgetPreference, resetPersonalization, setPreferenceEnabled } from '@creator-mall/core'
+import { assetView, generate, generationRequestSchema } from '../creator-engine.js'
 import { observationSchema, personalisationFor, recordCreatorObservation } from './creator.js'
 
 export function createApp(context: AppContext): Express {
@@ -281,6 +284,111 @@ export function createApp(context: AppContext): Express {
     const creator = currentProfile(context, request)
     if (!creator) return response.status(404).json({ error: 'no creator profile' })
     return response.json(resetPersonalization(context.control.preferences, creator.id))
+  })
+
+  // ── Creator Engine: generation and the media library ──────────────────────
+
+  app.post('/api/creator/generate', (request, response, next) => {
+    void (async () => {
+      try {
+        const creator = currentProfile(context, request)
+        if (!creator || !request.account) return response.status(404).json({ error: 'no creator profile' })
+
+        const body = generationRequestSchema.parse(request.body ?? {})
+        const platform = context.control.getPlatform(body.platform)
+        if (!platform) return response.status(404).json({ error: 'We do not know that platform yet.' })
+
+        const option = platformView(context, platform).uiConfig.options.find(
+          (entry) => entry.capabilityKey === body.option,
+        )
+        if (!option) return response.status(404).json({ error: 'We do not know that option for this platform.' })
+        if (!option.enabled) {
+          return response.status(409).json({ error: option.reason ?? 'That option is not available right now.' })
+        }
+
+        const output = await generate(
+          context,
+          {
+            platform,
+            state: context.control.latestSnapshot(platform.id)?.state ?? null,
+            request: {
+              brief: body.brief,
+              option: body.option,
+              ...(body.tone ? { tone: body.tone } : {}),
+              ...(body.targetSeconds ? { targetSeconds: body.targetSeconds } : {}),
+            },
+          },
+          context.media,
+          creator.id,
+        )
+
+        const asset = await context.media.create(
+          {
+            creatorId: creator.id,
+            kind: output.kind,
+            origin: 'GENERATED',
+            title: output.title,
+            mimeType: output.mimeType,
+            brief: body.brief,
+            platformSlug: platform.slug,
+            capabilityKey: body.option,
+            producedBy: output.producedBy,
+            modelGenerated: output.modelGenerated,
+            meta: output.meta,
+          },
+          output.content,
+        )
+
+        return response.json({
+          asset: assetView(asset),
+          content: output.content,
+          meta: output.meta,
+        })
+      } catch (error) {
+        return next(error)
+      }
+    })()
+  })
+
+  app.get('/api/creator/assets', (request, response) => {
+    const creator = currentProfile(context, request)
+    if (!creator) return response.status(404).json({ error: 'no creator profile' })
+    const kind = queryString(request.query.kind) as AssetKind | ''
+    const assets = context.media.list(creator.id, {
+      ...(kind && ASSET_KINDS.includes(kind) ? { kind } : {}),
+      limit: 50,
+    })
+    return response.json({ assets: assets.map(assetView) })
+  })
+
+  app.get('/api/creator/assets/:assetId', (request, response, next) => {
+    void (async () => {
+      try {
+        const creator = currentProfile(context, request)
+        const asset = context.media.get(request.params.assetId ?? '')
+        if (!creator || !asset) return response.status(404).json({ error: 'unknown asset' })
+        if (asset.creatorId !== creator.id) return response.status(403).json({ error: 'That is not your asset.' })
+
+        const stored = await context.media.read(asset.id)
+        if (!stored) return response.status(410).json({ error: 'The file behind this asset is gone.' })
+        return response
+          .type(asset.mimeType)
+          .send(Buffer.from(stored.body).toString('utf8'))
+      } catch (error) {
+        return next(error)
+      }
+    })()
+  })
+
+  app.delete('/api/creator/assets/:assetId', (request, response) => {
+    void (async () => {
+      const creator = currentProfile(context, request)
+      const asset = context.media.get(request.params.assetId ?? '')
+      if (!creator || !asset) return response.status(404).json({ error: 'unknown asset' })
+      if (asset.creatorId !== creator.id) return response.status(403).json({ error: 'That is not your asset.' })
+      await context.media.remove(asset.id)
+      return response.json({ removed: true })
+    })()
   })
 
   app.get('/api/creator/coming-soon', (_request, response) => {

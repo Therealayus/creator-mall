@@ -117,23 +117,31 @@ const OBSERVATION_AREAS = [
 ] as const satisfies ReadonlyArray<keyof PlatformState>
 
 /** Human-readable summary of what a snapshot says, used by the timeline view. */
-export function summarizeState(state: PlatformState): string[] {  const lines: string[] = []
-  const active = Object.values(state.capabilities).filter((entry) => entry.state === 'ACTIVE')
+export function summarizeState(state: PlatformState): string[] {
+  const lines: string[] = []
+  // Capability observations are stored in a record keyed by capability key, and
+  // the observation itself does not repeat that key. Read the key rather than a
+  // field, so a snapshot that actually carries capabilities cannot crash the view.
+  const observations = Object.entries(state.capabilities ?? {})
+  const name = (key: string) => key.toLowerCase().replace(/_/g, ' ')
+  const active = observations.filter(([, entry]) => entry?.state === 'ACTIVE')
   if (active.length > 0) {
-    lines.push(`Supports: ${active.map((entry) => entry.capabilityKey.toLowerCase().replace(/_/g, ' ')).join(', ')}.`)
+    lines.push(`Supports: ${active.map(([key]) => name(key)).join(', ')}.`)
   }
-  const retired = Object.values(state.capabilities).filter((entry) => entry.state === 'DEPRECATED' || entry.state === 'REMOVED')
+  const retired = observations.filter(
+    ([, entry]) => entry?.state === 'DEPRECATED' || entry?.state === 'REMOVED',
+  )
   if (retired.length > 0) {
-    lines.push(`No longer supported: ${retired.map((entry) => entry.capabilityKey.toLowerCase().replace(/_/g, ' ')).join(', ')}.`)
+    lines.push(`No longer supported: ${retired.map(([key]) => name(key)).join(', ')}.`)
   }
   for (const area of OBSERVATION_AREAS) {
-    for (const [key, value] of Object.entries(state[area])) {
+    for (const [key, value] of Object.entries(state[area] ?? {})) {
       if (value === null || value === undefined) continue
       if (isEmptyContainer(value)) continue
       lines.push(`${area}.${key} = ${describeValue(value)}`)
     }
   }
-  for (const policy of state.policies) {
+  for (const policy of state.policies ?? []) {
     if (typeof policy === 'string') lines.push(`Policy: ${policy}`)
   }
   return lines

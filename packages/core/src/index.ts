@@ -15,6 +15,7 @@ export * from './types/adapter.js'
 export * from './types/creator.js'
 export * from './types/health.js'
 export * from './types/auth.js'
+export * from './types/media.js'
 export * from './util.js'
 
 export * from './capabilities/registry.js'
@@ -48,6 +49,10 @@ export * from './prompts/diff.js'
 export * from './prompts/versioning.js'
 
 export * from './platform/bootstrap.js'
+
+export * from './generation/port.js'
+export * from './generation/deterministic.js'
+export * from './generation/model-copy.js'
 
 export * from './composer/draft.js'
 
