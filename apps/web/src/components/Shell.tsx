@@ -21,6 +21,9 @@ export function Shell(props: {
 }): ReactNode {
   return (
     <div className="shell">
+      <a className="skip" href="#main">
+        Skip to content
+      </a>
       <header className="topbar">
         <Link to="/" className="brand">
           <span className="mark">◆</span>
@@ -52,7 +55,7 @@ export function Shell(props: {
           </button>
         </div>
       </header>
-      <main className="main">{props.children}</main>
+      <main className="main" id="main" tabIndex={-1}>{props.children}</main>
       <footer className="footer">
         Platform facts come from official sources and are re-checked automatically ·{' '}
         <Link to="/platforms">Platform support</Link>

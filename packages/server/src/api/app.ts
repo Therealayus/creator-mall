@@ -157,10 +157,14 @@ export function createApp(context: AppContext): Express {
     return response.json(explainCapability(context, platform, capabilityKey))
   })
 
-  app.get('/api/sources', (_request, response) => {
+  app.get('/api/sources', (request, response) => {
     const now = Date.now()
     const sources = context.control.listSources()
-    const scored = sources.map((source) => ({ source, score: scoreSource(source, sourceStats(source), now) }))
+    // Bounded for the same reason as the event feed: the source registry grows
+    // with discovery, and an operator page should not stream all of it.
+    const scored = sources
+      .slice(0, pageLimit(request))
+      .map((source) => ({ source, score: scoreSource(source, sourceStats(source), now) }))
 
     response.json({
       curation: summariseCuration(scored),

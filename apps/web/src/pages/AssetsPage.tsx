@@ -123,6 +123,8 @@ export function AssetsPage(): ReactNode {
                   <img
                     src={assetUrl(asset.id)}
                     alt={asset.title}
+                    loading="lazy"
+                    decoding="async"
                     style={{ maxWidth: '100%', borderRadius: 8, display: 'block', margin: '12px 0' }}
                   />
                 </a>

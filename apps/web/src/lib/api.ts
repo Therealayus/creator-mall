@@ -111,7 +111,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   })
   const text = await response.text()
-  const payload: unknown = text ? (JSON.parse(text) as unknown) : null
+  // A proxy or gateway can answer with HTML rather than JSON, and the resulting
+  // SyntaxError used to be shown to the creator as the failure message.
+  let payload: unknown = null
+  if (text) {
+    try {
+      payload = JSON.parse(text) as unknown
+    } catch {
+      payload = null
+    }
+  }
   if (!response.ok) {
     const detail = payload as { error?: unknown }
     const raw = detail.error

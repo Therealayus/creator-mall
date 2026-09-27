@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import type { ControlPlaneState, PersistencePort } from './persistence.js'
 
@@ -29,8 +30,24 @@ export class FilePersistence implements PersistencePort {
 
   async save(state: ControlPlaneState): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true })
-    const temp = `${this.file}.tmp`
-    await writeFile(temp, JSON.stringify(state, null, 2), 'utf8')
+
+    // A unique temp name per save. A shared one let two concurrent writers
+    // interleave, and on Windows the loser's rename fails with EPERM, leaving a
+    // stray .tmp and a 500 on an otherwise successful request.
+    const temp = `${this.file}.${process.pid}.${randomUUID()}.tmp`
+
+    // Compact, not pretty. This is machine state that is rewritten on every
+    // mutating request; the 2-space indent made every write roughly 1.4x larger
+    // and correspondingly slower to serialise.
+    const handle = await open(temp, 'w')
+    try {
+      await handle.writeFile(JSON.stringify(state), 'utf8')
+      // Flush before the rename, so a crash cannot leave a renamed file whose
+      // contents never reached the disk.
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
     await rename(temp, this.file)
   }
 }

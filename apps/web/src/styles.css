@@ -279,3 +279,18 @@ button.ghost:hover { color: var(--text); border-color: var(--accent); }
   .main { padding: 22px 16px 56px; }
   .page-head h1 { font-size: 23px; }
 }
+
+/* Visible only once focused: the first tab stop on every page. */
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 16px;
+  z-index: 100;
+  border-radius: 0 0 8px 0;
+}
+.skip:focus {
+  left: 0;
+}
