@@ -15,8 +15,9 @@ integration plans through a controlled software lifecycle.
 
 ## What is in this repository
 
-Phases 1 to 4: the intelligence spine, the creator product on top of it, real accounts,
-and the infrastructure to run it for real. Every phase is working and tested end to end.
+Phases 1 to 5: the intelligence spine, the creator product on top of it, real accounts,
+the infrastructure to run it for real, and the three engines finished and hardened.
+Every phase is working and tested end to end.
 
 ```
 packages/
@@ -44,13 +45,19 @@ apps/
 | Evolution Center API + admin dashboard | `server/src/api` |
 | Creator-facing API, in plain language only | `server/src/api/creator.ts` |
 | Deterministic, capability-aware draft composer | `core/src/composer` |
-| Creator web app (creation flow, updates, platform support) | `apps/web` |
+| Generation ports + deterministic renderer + model-backed copy | `core/src/generation` |
+| Verified tool catalogue (Market Engine) | `core/src/market` |
+| Regression runner + activation gate | `core/src/evolution/regression.ts` |
+| Durable media library and asset storage | `server/src/store/media-library.ts` |
+| Per-IP rate limiting | `server/src/api/rate-limit.ts` |
+| Password reset and email verification | `server/src/api/account-recovery.ts` |
+| Creator web app (creation flow, updates, platform support, library, tools) | `apps/web` |
 
 ## Quick start
 
 ```bash
 npm install
-npm run verify        # lint + typecheck + 277 tests
+npm run verify        # lint + typecheck + 409 tests
 npm run dev           # api on :4000, web on :5173
 ```
 
@@ -171,8 +178,14 @@ See `.env.example`. Notable values:
 | `ADMIN_TOKEN` | *(empty)* | operator token for admin surfaces; required in production |
 | `OPENROUTER_API_KEY` | *(empty)* | optional model for fact extraction; unset means deterministic only |
 | `OPENROUTER_MODEL` | `openrouter/stealth/space-bunny-alpha` | model id |
-| `DATA_DIR` | *(empty = memory)* | directory for the control-plane JSON snapshot |
+| `DATA_DIR` | *(empty = memory)* | directory for the control-plane JSON snapshot and asset bytes |
+| `ASSET_STORAGE` | *(follows `DATA_DIR`)* | `file` or `memory` for asset bytes |
 | `RESPECT_ROBOTS` | `true` | honour robots.txt |
+| `AUTH_RATE_LIMIT` | `60` | sign-in attempts allowed per IP per window |
+| `AUTH_RATE_WINDOW_MS` | `900000` | the window that limit applies over |
+| `TRUST_PROXY` | `false` | read `X-Forwarded-For`; only on behind a proxy you control |
+| `REQUIRE_EMAIL_VERIFICATION` | `false` | hold sign-in until the address is confirmed |
+| `EXPOSE_ACCOUNT_LINKS` | `false` | return reset and verification links in responses; ignored in production |
 
 ## The model is an assistant, not an authority
 

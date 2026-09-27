@@ -370,3 +370,62 @@ Both degrade the same way: a provider failure falls back silently, records a
 key-free reason, and never blocks the cycle. The local defaults are not
 placeholders — knowledge is searchable and limits are extractable with no key,
 no network, and nothing about a creator leaving the machine.
+## 19. The three engines, and what each one is allowed to do
+
+The control plane is shared; the three engines have deliberately different powers, because
+trust should not be uniform across a system.
+
+| Engine | Reads | Writes | May it act on its own? |
+| --- | --- | --- | --- |
+| World | public sources | knowledge, events | yes, for low-risk knowledge refreshes |
+| Creator | verified knowledge | assets, observations | yes, for the creator's own work |
+| Market | verified knowledge | nothing | it only ever reads |
+| Evolution | events, drafts | drafts, proposals | never; it gates on a regression run |
+
+The Market Engine (`core/src/market`) is the read-most of the three. It derives a catalogue of
+tools, endpoints and official reading from facts the World Engine has already verified, and it
+inherits one rule: **nothing appears without evidence.** A tool is refused unless a `CURRENT`,
+verified claim is backed by an active official or verified source, and it is refused again the
+moment that claim is retracted or that source is deactivated. `CONFIRMED` is reserved for an
+official claim from an official source; everything else is `likely`.
+
+There is no curated partner list, no affiliate placement and no ranking. That is a smaller
+product than a marketplace, and it is the only version of one worth shipping, because a
+catalogue that reads as evidence without being any is worse than no catalogue.
+
+## 20. Self-modification is gated, not merely versioned
+
+`PromptLibrary.draftNext` existed from Phase 1 and was never called, so a platform changed and
+the system carried on writing the way it always had. It is now called on every verified change,
+and the draft sits in `DRAFT` until `core/src/evolution/regression.ts` has something to say.
+
+The chain is the whole point:
+
+```
+verified change -> draft -> run the checks -> only then may it go live
+```
+
+The checks are mechanical: does the output fit a limit the platform documents, does it avoid
+what it was told to avoid, is it a real post rather than a stub. The verdict rules are strict on
+purpose. Any failure is `REJECT`, with no averaging. A run that could not test everything is
+`NEEDS_REVIEW`, because an untested run is not a pass. An empty suite never approves. And a
+`CRITICAL` change is refused regardless, because no run of a prompt can earn that back.
+
+`decideActivation` allows a person to overrule a refusal, but reports it as an override rather
+than a pass. With no model configured every case skips, so activation stays closed until a human
+looks. A deterministic renderer is not evidence that a prompt is good.
+
+## 21. Rate limiting trusts nothing it was told
+
+`core/src` has no rate limiter because it has no idea who is calling. The server puts one in
+front of sign-in, sign-up and reset, with a sliding window, a `retry-after` a client can wait
+out, and separate buckets per route so one slow endpoint cannot starve another.
+
+The address it limits on is `req.ip` unless `TRUST_PROXY` is set, and only then is
+`X-Forwarded-For` read. A header any client can set is not an identity, and treating it as one
+would make the limit trivially bypassable by changing a header.
+
+Password reset and email verification deliberately do **not** require a session or a CSRF token.
+A person who cannot sign in is the entire reason those flows exist. What guards them instead is
+a single-use, time-limited token stored as a SHA-256 hash, and consuming it revokes every session
+the account had.
