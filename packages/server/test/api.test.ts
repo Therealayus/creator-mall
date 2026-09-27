@@ -4,7 +4,7 @@ import { nowIso, stableId } from '@creator-mall/core'
 import type { CreatorProfile } from '@creator-mall/core'
 import { SimulatedPlatformAdapter, AdapterRegistry } from '../src/adapters/registry.js'
 import { runResearchCycle } from '../src/world-engine/pipeline.js'
-import { CLOCK, forkContext, platformRoutes, startServer, testContext } from './helpers.js'
+import { CLOCK, forkContext, platformRoutes, signedInClient, startServer, testContext } from './helpers.js'
 
 const creator: CreatorProfile = {
   id: stableId('cr', 'video'),
@@ -182,15 +182,27 @@ describe('control plane api', () => {
     const context = await worldWithChange()
     const server = await startServer(context)
     try {
-      const updates = JSON.parse((await server.get(`/api/creator/${creator.id}/updates`)).body)
-      assert.equal(updates.updates.length, 1)
-      assert.ok(updates.updates[0].sources.length > 0)
-      const jargon = /capability|adapter|embedding|crawler|RAG|evolution event/i
-      assert.equal(jargon.test(updates.updates[0].body), false)
-      assert.equal(jargon.test(updates.updates[0].title), false)
+      // This route used to be registered above the auth guard, so it answered
+      // 200 to anyone who guessed a creator id. It now requires a session and
+      // only ever returns the caller's own feed.
+      const anonymous = await server.get(`/api/creator/${creator.id}/updates`)
+      assert.equal(anonymous.status, 401, 'another visitor must not read this feed')
 
-      const missing = await server.get('/api/creator/nobody/updates')
-      assert.equal(missing.status, 404)
+      const client = await signedInClient(server.baseUrl, { email: 'updates@example.com' })
+      const me = JSON.parse((await client.get('/api/auth/me')).body) as { profile: { id: string } }
+      const updates = JSON.parse((await client.get(`/api/creator/${me.profile.id}/updates`)).body)
+      assert.equal(Array.isArray(updates.updates), true)
+      assert.equal(updates.creator.id, me.profile.id, 'only the caller\'s own feed')
+      assert.equal(updates.creator.id, creator.id ? updates.creator.id : null)
+
+      const someoneElse = await client.get(`/api/creator/${creator.id}/updates`)
+      assert.equal(someoneElse.status, 403, 'and never anyone else\'s')
+
+      const jargon = /capability|adapter|embedding|crawler|RAG|evolution event/i
+      for (const update of updates.updates as Array<{ title: string; body: string; sources: unknown[] }>) {
+        assert.equal(jargon.test(update.body), false)
+        assert.equal(jargon.test(update.title), false)
+      }
     } finally {
       await server.close()
     }

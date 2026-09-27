@@ -54,7 +54,11 @@ export async function authedFetch<T>(path: string, init: RequestInit = {}): Prom
   if (token && init.method && init.method !== 'GET') headers[CSRF_HEADER] = token
 
   const extra = (init.headers ?? {}) as Record<string, string>
-  const response = await fetch(path, { ...init, headers: { ...headers, ...extra } })
+  const response = await fetch(path, {
+    signal: AbortSignal.timeout(15000),
+    ...init,
+    headers: { ...headers, ...extra },
+  })
   return parse<T>(response)
 }
 

@@ -21,6 +21,7 @@ export function SignInPage(props: { onAuthenticated: () => void; initialMode?: A
   const [resetEmail, setResetEmail] = useState('')
   const [resetSent, setResetSent] = useState<{ message: string; devLink?: string } | null>(null)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [resetBusy, setResetBusy] = useState(false)
 
   useEffect(() => {
     document.title = form.mode === 'signin' ? 'Sign in · Creator Mall' : 'Create an account · Creator Mall'
@@ -35,19 +36,21 @@ export function SignInPage(props: { onAuthenticated: () => void; initialMode?: A
    * page says so, because an endpoint that says "no such user" is an account
    * list for anyone who wants one.
    */
-  async function sendResetLink(event: FormEvent): Promise<void> {
-    event.preventDefault()
+  async function sendResetLink(): Promise<void> {
     const email = resetEmail.trim()
     if (email.length < 3) {
       setResetError('Enter the email address you signed up with.')
       return
     }
     setResetError(null)
+    setResetBusy(true)
     try {
       const result = await requestPasswordReset(email)
       setResetSent({ message: result.message, ...(result.devLink ? { devLink: result.devLink } : {}) })
     } catch (cause) {
       setResetError(cause instanceof Error ? cause.message : 'Could not send that just now')
+    } finally {
+      setResetBusy(false)
     }
   }
 
@@ -179,13 +182,13 @@ export function SignInPage(props: { onAuthenticated: () => void; initialMode?: A
             </button>
 
             {resetting && (
-              <form onSubmit={(event) => void sendResetLink(event)} style={{ marginTop: 10 }}>
+              <div style={{ marginTop: 10 }}>
                 {resetError && <div className="notice stop">{resetError}</div>}
                 <div className="field">
                   <label htmlFor="reset-email">Email</label>
                   <input
                     id="reset-email"
-                    type="text"
+                    type="email"
                     autoComplete="email"
                     value={resetEmail}
                     onChange={(event) => {
@@ -195,10 +198,15 @@ export function SignInPage(props: { onAuthenticated: () => void; initialMode?: A
                   />
                   <span className="help">We will send a link to set a new one.</span>
                 </div>
-                <button className="ghost" type="submit">
-                  Send me a link
+                <button
+                  className="ghost"
+                  type="button"
+                  disabled={resetBusy}
+                  onClick={() => void sendResetLink()}
+                >
+                  {resetBusy ? 'Sending…' : 'Send me a link'}
                 </button>
-              </form>
+              </div>
             )}
           </div>
         )}

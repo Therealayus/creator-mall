@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { fetchOverview } from './lib/api.js'
+import { ApiError, fetchOverview } from './lib/api.js'
 import { isPublicPath } from './lib/view-models.js'
 import type { CreatorOverview } from './lib/api.js'
 import { authedFetch, restoreSession, signOut } from './lib/auth.js'
@@ -35,14 +35,16 @@ export function App(): ReactNode {
       setOverview(await fetchOverview())
       setPhase('ready')
     } catch (cause) {
-      // A 401 means the session went away; anything else is a real problem.
-      if (cause instanceof Error && cause.name === 'ApiError') {
+      // Only a 401 means the session went away. Signing a creator out because
+      // the server had a bad minute would be both wrong and alarming.
+      if (cause instanceof ApiError && cause.status === 401) {
         setSession(null)
         setPhase('signed-out')
         return
       }
-      setError(cause instanceof Error ? cause.message : 'Could not reach Creator Mall')
+      setError(cause instanceof Error ? cause.message : 'Something went wrong.')
       setPhase('error')
+      return
     }
   }, [])
 

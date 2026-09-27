@@ -294,16 +294,28 @@ const decisionSchema = z.object({
     return response.json({ documents })
   })
 
+  // ── Creator-facing surface ──────────────────────────────────────────────────
+  // Plain language only: options, limits, reasons, sources.
+  //
+  // Authorization is enforced by this mount, so every route below it can rely on
+  // request.account. Routes registered ABOVE this line are unauthenticated by
+  // construction; the creator id in the path is never an authorisation check on
+  // its own.
+
+  app.use('/api/creator', requireAuth(context))
+
   app.get('/api/creator/:creatorId/updates', (request, response) => {
-    const updates = creatorUpdates(context, request.params.creatorId ?? '')
+    // The id in the path must match the session, otherwise one creator can read
+    // another's feed by guessing an id.
+    const me = currentProfile(context, request)
+    if (!me) return response.status(404).json({ error: 'no creator profile' })
+    const requested = request.params.creatorId ?? ''
+    if (requested !== me.id) return response.status(403).json({ error: 'That is not your feed.' })
+
+    const updates = creatorUpdates(context, requested)
     if (!updates) return response.status(404).json({ error: 'unknown creator' })
     return response.json(updates)
   })
-
-  // ── Creator-facing surface ──────────────────────────────────────────────────
-  // Plain language only: options, limits, reasons, sources.
-
-  app.use('/api/creator', requireAuth(context))
 
   app.get('/api/creator/overview', (request, response) => {
     response.json(creatorOverview(context, currentProfile(context, request)))
@@ -594,7 +606,11 @@ const decisionSchema = z.object({
   })
 
   app.get('/api/creator/:creatorId/impact', (request, response) => {
-    const creator = context.control.getCreator(request.params.creatorId ?? '')
+    const me = currentProfile(context, request)
+    if (!me) return response.status(404).json({ error: 'no creator profile' })
+    const requested = request.params.creatorId ?? ''
+    if (requested !== me.id) return response.status(403).json({ error: 'That is not your profile.' })
+    const creator = context.control.getCreator(requested)
     if (!creator) return response.status(404).json({ error: 'unknown creator' })
     return response.json({ creator, impacts: context.control.listImpacts(creator.id) })
   })
@@ -633,8 +649,18 @@ const decisionSchema = z.object({
     if (error instanceof ZodError) {
       return response.status(400).json({ error: 'invalid request', issues: error.issues })
     }
-    const message = error instanceof Error ? error.message : 'unexpected error'
-    return response.status(500).json({ error: message })
+
+    // An unexpected error can carry a filesystem path, a SQL fragment or a
+    // provider message. Log it where an operator can find it; do not hand it to
+    // whoever happened to make the request.
+    console.error('[api] unhandled error', error)
+
+    // Body-parser rejections (oversize, malformed JSON) already carry a status.
+    const status = (error as { status?: number }).status
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      return response.status(status).json({ error: 'That request could not be read.' })
+    }
+    return response.status(500).json({ error: 'Something went wrong on our side.' })
   })
 
   return app

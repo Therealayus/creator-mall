@@ -209,6 +209,7 @@ CREATE INDEX IF NOT EXISTS cm_preference_creator_idx ON cm_preference (creator_i
 CREATE TABLE IF NOT EXISTS cm_preference_counter (
   id         text PRIMARY KEY,
   creator_id text NOT NULL,
+  key        text NOT NULL,
   value      text NOT NULL,
   weight     integer NOT NULL DEFAULT 0
 );

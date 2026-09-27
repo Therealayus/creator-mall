@@ -314,8 +314,8 @@ export function CreatePage(props: { overview: CreatorOverview }): ReactNode {
                   {made.meta.storyboard && (
                     <ol className="shot-list">
                       {made.meta.storyboard.shots.map((shot) => (
-                        <li key={shot.order}>
-                          <strong>{shot.shot}</strong> ({shot.durationSeconds}s) — {shot.onScreen}
+                        <li key={shot.index}>
+                          <strong>{shot.visual}</strong> ({shot.seconds}s) — {shot.onScreenText}
                           <br />
                           <span className="help">{shot.voiceover}</span>
                         </li>

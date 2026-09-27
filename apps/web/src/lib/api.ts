@@ -107,6 +107,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await globalThis.fetch(path, {
     headers: { 'content-type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
     ...init,
   })
   const text = await response.text()
@@ -263,8 +264,8 @@ export interface GenerationResult {
   meta: {
     copy?: { hook: string; body: string; cta: string; hashtags: string[] }
     poster?: { width: number; height: number; alt: string; producedBy: string }
-    storyboard?: { shots: Array<{ order: number; durationSeconds: number; shot: string; onScreen: string; voiceover: string }> }
-    audio?: { totalSeconds: number; segments: Array<{ at: number; text: string }> }
+    storyboard?: { totalSeconds: number; shots: Array<{ index: number; seconds: number; visual: string; voiceover: string; onScreenText: string }> }
+    audio?: { totalSeconds: number; segments: Array<{ at: number; seconds: number; text: string }> }
   }
 }
 

@@ -215,6 +215,9 @@ export function authRoutes(context: AppContext): Router {
         userAgent: request.header('user-agent') ?? null,
       })
       context.control.addSession(session)
+      // The account, its profile, the account→profile link and the session all
+      // have to survive a restart, or a creator who signs up is gone.
+      await context.persist()
 
       response
         .status(201)
@@ -225,7 +228,7 @@ export function authRoutes(context: AppContext): Router {
           csrfToken: session.csrfToken,
           ...(context.config.REQUIRE_EMAIL_VERIFICATION
             ? (() => {
-                const issued = requestEmailVerification(context, account, baseUrlOf(request))
+                const issued = requestEmailVerification(context, account, baseUrlOf(request, context))
                 return issued.token ? { devVerifyToken: issued.token } : {}
               })()
             : {}),
@@ -295,6 +298,7 @@ export function authRoutes(context: AppContext): Router {
         userAgent: request.header('user-agent') ?? null,
       })
       context.control.addSession(session)
+      await context.persist()
 
       response
         .setHeader('set-cookie', sessionCookieHeader(token, { maxAgeMs: context.config.SESSION_TTL_HOURS * 3_600_000, secure: context.config.COOKIE_SECURE }))
@@ -307,6 +311,7 @@ export function authRoutes(context: AppContext): Router {
   router.post('/logout', (request, response) => {
     if (request.session) {
       context.control.replaceSession({ ...request.session, revokedAt: nowIso() })
+      void context.persist().catch(() => undefined)
     }
     response
       .setHeader('set-cookie', clearSessionCookie(context.config.COOKIE_SECURE))
@@ -349,7 +354,7 @@ export function authRoutes(context: AppContext): Router {
       return
     }
 
-    const result = requestPasswordReset(context, parsed.data.email, baseUrlOf(request))
+    const result = requestPasswordReset(context, parsed.data.email, baseUrlOf(request, context))
     response.status(202).json({
       ...result.response,
       ...(result.token ? { devToken: result.token, devLink: result.link } : {}),
@@ -415,9 +420,20 @@ function limitKey(context: AppContext, request: Request, route: string): string 
 }
 
 /** Where a link should send someone, taken from the request that asked. */
-function baseUrlOf(request: Request): string {
+/**
+ * Where a recovery link should point.
+ *
+ * Derived from configuration, never from the request: `Host` and
+ * `X-Forwarded-Proto` are both set by the caller, so trusting them lets an
+ * attacker rewrite a password-reset link to point at a host they control and
+ * steal the token. Falls back to the request only when no base URL is
+ * configured, which is a development-only situation.
+ */
+function baseUrlOf(request: Request, context: AppContext): string {
+  const configured = context.config.PUBLIC_BASE_URL?.trim()
+  if (configured) return configured.replace(/\/+$/, '')
   const host = request.get('host') ?? 'localhost:4000'
-  const proto = request.get('x-forwarded-proto') ?? request.protocol ?? 'http'
+  const proto = request.protocol ?? 'http'
   return `${proto}://${host}`
 }
 

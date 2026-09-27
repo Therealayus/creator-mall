@@ -53,6 +53,12 @@ export interface ResearchDeps {
    * outage degrades quality instead of stopping research (§38).
    */
   modelExtractor?: FactExtractor | null
+  /**
+   * Called once a cycle has finished. The scheduler passes `context.persist`
+   * here: without it everything a cycle learns lives in memory until the process
+   * dies, and autonomous research silently produces nothing durable.
+   */
+  onCycleComplete?: (result: CycleResult) => Promise<void> | void
   /** Optional hosted embedding provider; the local one is the default. */
   embeddingProvider?: EmbeddingProvider | null
   /** Called with a short, key-free reason when the model path is skipped. */
@@ -82,7 +88,7 @@ export interface CycleResult extends ResearchJobRun {
  */
 export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult> {
   const clock = deps.clock ?? Date.now
-  const { control, fetcher } = deps
+  const { control, fetcher, onCycleComplete } = deps
   const startedAt = nowIso(clock)
 
   const heuristic = new HeuristicFactExtractor()
@@ -254,6 +260,8 @@ export async function runResearchCycle(deps: ResearchDeps): Promise<CycleResult>
     events: createdEvents,
   }
   control.addJobRun(result)
+  // The caller decides how this survives a restart. Nothing else will.
+  if (onCycleComplete) await onCycleComplete(result)
   return result
 }
 

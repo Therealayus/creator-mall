@@ -35,12 +35,59 @@ export class PublicFetcher {
   private readonly config: Config
 
   isAllowedHost(host: string): boolean {
-    if (this.config.allowedHosts.size === 0) return true
     const normalized = host.toLowerCase()
+    // Link-local and loopback targets are never a legitimate platform source.
+    // Checked before the allowlist, because an empty allowlist allows everything
+    // and must not make the metadata endpoint reachable.
+    if (normalized === 'localhost' || normalized === '::1' || normalized.endsWith('.localhost')) return false
+    if (normalized === '169.254.169.254' || normalized.startsWith('169.254.')) return false
+    if (normalized.startsWith('127.') || normalized.startsWith('10.') || normalized.startsWith('192.168.')) return false
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(normalized)) return false
+    if (normalized === '[::1]' || normalized.startsWith('fc') || normalized.startsWith('fd')) return false
+
+    if (this.config.allowedHosts.size === 0) return true
     for (const allowed of this.config.allowedHosts) {
       if (normalized === allowed || normalized.endsWith(`.${allowed}`)) return true
     }
     return false
+  }
+
+  /**
+   * Follows redirects one hop at a time, re-checking the allowlist and the hop
+   * count each time. `redirect: 'follow'` would bypass both.
+   */
+  private async fetchWithCheckedRedirects(
+    url: string,
+    headers: Record<string, string>,
+    request: FetchRequest,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    const maxHops = 3
+    let current = url
+
+    for (let hop = 0; hop <= maxHops; hop += 1) {
+      const response = await this.fetchImpl(current, {
+        headers,
+        redirect: 'manual',
+        signal,
+      })
+
+      const location = response.headers.get('location')
+      const isRedirect = response.status >= 300 && response.status < 400 && location
+      if (!isRedirect) return response
+
+      const next = new URL(location, current).toString()
+      const host = new URL(next).hostname
+      if (!this.isAllowedHost(host)) {
+        throw new Error(`redirect to a host that is not allowed: ${host}`)
+      }
+      if (hop === maxHops) {
+        throw new Error('too many redirects')
+      }
+      current = next
+    }
+
+    throw new Error('too many redirects')
   }
 
   async fetch(source: Source, conditional: { etag?: string; lastModified?: string } = {}): Promise<FetchOutcome> {
@@ -101,7 +148,10 @@ export class PublicFetcher {
       const timer = setTimeout(() => controller.abort(), request.timeoutMs)
       let response: Response
       try {
-        response = await this.fetchImpl(url, { headers, redirect: 'follow', signal: controller.signal })
+        // Redirects are followed manually and re-checked, because `follow` would
+        // let an allowed host bounce us to an internal address or cloud metadata
+        // and the allowlist would never be consulted for that hop.
+        response = await this.fetchWithCheckedRedirects(url, headers, request, controller.signal)
       } finally {
         clearTimeout(timer)
       }

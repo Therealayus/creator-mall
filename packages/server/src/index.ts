@@ -25,6 +25,8 @@ async function main(): Promise<void> {
         modelExtractor: context.modelExtractor,
         embeddingProvider: context.embeddingProvider,
         onModelFallback: (reason) => console.log(`[world-engine] model extraction skipped: ${reason}`),
+        // Autonomous research that is never written down is wasted work.
+        onCycleComplete: () => context.persist(),
       },
       {
         intervalMs: context.config.RESEARCH_INTERVAL_MS,
@@ -40,10 +42,31 @@ async function main(): Promise<void> {
   const shutdown = (signal: string): void => {
     console.log(`[creator-mall] ${signal} received, shutting down`)
     scheduler?.stop()
-    server.close(() => process.exit(0))
+    // Flush before closing: everything the World Engine and the auth routes
+    // learned is only in memory until this runs.
+    void context
+      .persist()
+      .catch((error: unknown) => {
+        console.error('[creator-mall] could not flush state on shutdown', error)
+      })
+      .finally(() => {
+        server.close(() => process.exit(0))
+        // Do not let a stuck connection hold the process open forever.
+        setTimeout(() => process.exit(0), 15_000).unref()
+      })
   }
   process.on('SIGINT', () => shutdown('SIGINT'))
   process.on('SIGTERM', () => shutdown('SIGTERM'))
+
+  // A rejection that reaches here is otherwise silent, and Node exits on an
+  // unhandled rejection without anything in the logs saying why.
+  process.on('unhandledRejection', (reason) => {
+    console.error('[creator-mall] unhandled rejection', reason)
+  })
+  process.on('uncaughtException', (error) => {
+    console.error('[creator-mall] uncaught exception', error)
+    shutdown('uncaughtException')
+  })
 }
 
 main().catch((error: unknown) => {

@@ -83,5 +83,8 @@ interface PgLike {
 }
 
 export async function readSchema(): Promise<string> {
-  return readFile(fileURLToPath(new URL('../sql/schema.sql', import.meta.url)), 'utf8')
+  // Resolves to packages/server/sql/schema.sql from both src/store/ and
+  // dist/store/. The old single `..` pointed at src/sql/, which does not exist,
+  // so `npm run db:migrate` failed with ENOENT before running a single statement.
+  return readFile(fileURLToPath(new URL('../../sql/schema.sql', import.meta.url)), 'utf8')
 }

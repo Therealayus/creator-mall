@@ -53,6 +53,12 @@ const schema = z.object({
    * and forced off in production regardless of what is set here.
    */
   EXPOSE_ACCOUNT_LINKS: z.coerce.boolean().default(false),
+  /**
+   * The public origin recovery links must point at, e.g. https://creatormall.app.
+   * Required in production: without it a forged Host header can rewrite a
+   * password-reset link and steal the token.
+   */
+  PUBLIC_BASE_URL: z.string().default(''),
 
   /** World Engine cadence. */
   RESEARCH_INTERVAL_MS: z.coerce.number().int().min(30_000).default(15 * 60_000),

@@ -20,6 +20,14 @@ export async function migrate(client: SqlClient): Promise<{ statements: number }
   for (const statement of statements) {
     await client.query(statement)
   }
+
+  // The schema file only creates tables; it never records that they were applied.
+  // Without this row `checkSchema` can never be satisfied on a fresh database, so
+  // PERSISTENCE=postgres would refuse to boot forever.
+  await client.query(
+    `INSERT INTO cm_meta (id, schema_version) VALUES (1, ${schemaVersion}) ON CONFLICT (id) DO UPDATE SET schema_version = EXCLUDED.schema_version`,
+  )
+
   return { statements: statements.length }
 }
 

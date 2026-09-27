@@ -289,6 +289,8 @@ const TABLES = [
   'cm_impact',
   'cm_creator_profile',
   'cm_preference_counter',
+  'cm_media_asset',
+  'cm_profile_account_link',
   'cm_preference',
   'cm_preference_observation',
   'cm_dependency_edge',
