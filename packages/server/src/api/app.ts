@@ -243,6 +243,16 @@ const decisionSchema = z.strictObject({
     note: z.string().max(2000).nullish(),
   })
 
+  /**
+   * Template decisions take only a decision. The actor is deliberately absent:
+   * the route reads it from the session, because a decision log that trusts
+   * the request body is caller-spoofable (the proposals route still has this
+   * flaw; see FINDINGS.md A-12).
+   */
+  const templateDecisionSchema = z.strictObject({
+    decision: z.enum(['APPROVED', 'RETIRED']),
+  })
+
   app.get('/api/evolution/prompts', (_request, response) => {
     const prompts = context.control.prompts.all().map((version) => ({
       promptKey: version.promptKey,
@@ -311,6 +321,32 @@ const decisionSchema = z.strictObject({
         refusal: result.activation.refusal,
         version: result.version?.version ?? versionNumber,
       })
+    } catch (error) {
+      return next(error)
+    }
+  })
+
+  /**
+   * Decide a proposed template. Mirrors the prompt activation route: a decision
+   * is recorded with who made it, re-deciding is refused rather than silently
+   * re-applied, and the actor comes from the session, never the request body.
+   */
+  app.post('/api/evolution/templates/:templateId/decision', (request, response, next) => {
+    try {
+      const body = templateDecisionSchema.parse(request.body ?? {})
+      const templateId = decodeURIComponent(request.params.templateId ?? '')
+      const decidedBy = request.account?.displayName ?? 'admin'
+      const result = context.control.decideTemplate(templateId, body.decision, decidedBy)
+      if (!result.ok) {
+        const status = result.reason === 'NOT_FOUND' ? 404 : 409
+        const message =
+          result.reason === 'NOT_FOUND'
+            ? 'We have no such template.'
+            : 'That template has already been decided.'
+        return response.status(status).json({ error: message })
+      }
+      void context.persist().catch(() => undefined)
+      return response.json({ template: result.template })
     } catch (error) {
       return next(error)
     }

@@ -347,6 +347,40 @@ export class ControlPlane {
     return template
   }
 
+  /**
+   * Decides a proposed template. Mirrors the prompt activation gate in shape:
+   * only a PROPOSED template can move, an approval is recorded with who
+   * decided it, and re-deciding an already-decided template is refused rather
+   * than silently re-applied. Until this existed, auto-drafted templates could
+   * never leave PROPOSED — half of self-evolution was inert.
+   */
+  decideTemplate(
+    templateId: string,
+    decision: 'APPROVED' | 'RETIRED',
+    decidedBy: string,
+  ):
+    | { ok: true; template: TemplateDefinition }
+    | { ok: false; reason: 'NOT_FOUND' | 'NOT_PROPOSED' } {
+    for (const [platformId, list] of this.templates) {
+      const index = list.findIndex((entry) => entry.id === templateId)
+      if (index === -1) continue
+      const current = list[index]!
+      if (current.status !== 'PROPOSED') {
+        return { ok: false, reason: 'NOT_PROPOSED' }
+      }
+      const decided: TemplateDefinition = {
+        ...current,
+        status: decision,
+        decidedBy,
+        decidedAt: nowIso(),
+      }
+      list[index] = decided
+      this.templates.set(platformId, list)
+      return { ok: true, template: decided }
+    }
+    return { ok: false, reason: 'NOT_FOUND' }
+  }
+
   listTemplates(platformId?: string): TemplateDefinition[] {
     if (platformId) return [...(this.templates.get(platformId) ?? [])]
     return [...this.templates.values()].flat()

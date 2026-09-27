@@ -483,3 +483,71 @@ describe('SCALE: history is bounded and lists are paginated', () => {
     }
   })
 })
+
+describe('EVOLUTION: a proposed template can actually be decided', () => {
+  async function worldWithProposal() {
+    const context = await testContext({}, { ALLOW_UNAUTHENTICATED_ADMIN: true })
+    const platform = context.control.listPlatforms()[0]!
+    context.control.addTemplate({
+      id: 'tpl_pending_1',
+      platformId: platform.id,
+      capabilityKey: 'SHORT_VIDEO',
+      name: 'Pending template',
+      structure: 'Hook, body, close.',
+      hook: null,
+      cta: null,
+      status: 'PROPOSED',
+      createdBy: 'WORLD_ENGINE',
+      createdAt: '2026-09-27T12:00:00.000Z',
+      basedOnEventId: null,
+    })
+    const server = await startServer(context)
+    return { context, server }
+  }
+
+  const decide = (
+    server: { get: (p: string, i?: RequestInit) => Promise<{ status: number; body: string }> },
+    id: string,
+    decision: string,
+  ) =>
+    server.get(`/api/evolution/templates/${encodeURIComponent(id)}/decision`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    })
+
+  it('approves a proposed template and records who decided it', async () => {
+    const { server } = await worldWithProposal()
+    try {
+      const response = await decide(server, 'tpl_pending_1', 'APPROVED')
+      assert.equal(response.status, 200, response.body)
+      const body = JSON.parse(response.body) as { template: { status: string; decidedBy: string } }
+      assert.equal(body.template.status, 'APPROVED')
+      assert.equal(typeof body.template.decidedBy, 'string')
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('refuses to decide the same template twice', async () => {
+    const { server } = await worldWithProposal()
+    try {
+      assert.equal((await decide(server, 'tpl_pending_1', 'APPROVED')).status, 200)
+      const again = await decide(server, 'tpl_pending_1', 'RETIRED')
+      assert.equal(again.status, 409, 'a decided template is not silently re-decided')
+      assert.match(JSON.parse(again.body).error, /already been decided/)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('404s a template that does not exist, and 400s a bad decision', async () => {
+    const { server } = await worldWithProposal()
+    try {
+      assert.equal((await decide(server, 'tpl_nope', 'APPROVED')).status, 404)
+      assert.equal((await decide(server, 'tpl_pending_1', 'MAYBE')).status, 400)
+    } finally {
+      await server.close()
+    }
+  })
+})

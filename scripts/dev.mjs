@@ -27,6 +27,10 @@ for (const task of TASKS) {
       // falling open: production never runs through this script, so the gate
       // stays shut everywhere else.
       ALLOW_UNAUTHENTICATED_ADMIN: process.env.ALLOW_UNAUTHENTICATED_ADMIN ?? 'true',
+      // Local development keeps its state on disk, so restarting the app does
+      // not wipe every account. Production sets DATA_DIR explicitly; this only
+      // fills in the dev default. `data/` is gitignored.
+      DATA_DIR: process.env.DATA_DIR ?? 'data',
     },
     shell: process.platform === 'win32',
   })

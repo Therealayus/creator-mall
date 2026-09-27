@@ -157,6 +157,9 @@ export interface TemplateDefinition {
   createdBy: 'WORLD_ENGINE' | 'ADMIN' | 'SEED'
   createdAt: string
   basedOnEventId: string | null
+  /** Who approved or retired it, and when. Absent while it is still proposed. */
+  decidedBy?: string | null
+  decidedAt?: string | null
 }
 
 export interface TestOutcome {
