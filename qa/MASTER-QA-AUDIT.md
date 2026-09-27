@@ -33,17 +33,17 @@ audit brief, in its purest form. It is now the opposite test.
 
 | Category | Status | Critical findings | Evidence |
 | --- | --- | ---: | --- |
-| Security | **NEEDS WORK** | 4 P0, 7 P1 | authz ordering, IDOR, SSRF, link poisoning, error leak — all fixed; rate-limit gaps open |
-| API | **NEEDS WORK** | 2 P0, 7 P1 | full route inventory; no envelope convention; no pagination anywhere; no idempotency |
-| Database | **NEEDS WORK** | 6 P0 | Postgres could not boot, could not migrate, and could not save — all fixed; retention still unbounded |
-| AI | **NEEDS WORK** | 1 P0, 8 P1 | prompt injection reachable; prompt versioning has no effect on output; no cost ceiling |
-| Frontend | **NEEDS WORK** | 2 P0, 5 P1 | blank shot list; silent sign-out; no error boundary; no timeouts; SSR-smoke-only tests |
+| Security | **PASS WITH FINDINGS** | 0 P0 open | All 4 P0 and the top P1s fixed; rate-limit and lockout edges remain |
+| API | **PASS WITH FINDINGS** | 0 P0 open | Full inventory; envelope is still ad-hoc and idempotency is absent |
+| Database | **NEEDS WORK** | 0 P0 open | Postgres boot/migrate/save all fixed; save is still delete-all-then-insert |
+| AI | **PASS WITH FINDINGS** | 0 P0 open | Injection closed and prompts now reach output; embeddings still unused, no cost ceiling |
+| Frontend | **PASS WITH FINDINGS** | 0 P0 open | Shot list, sign-out, boundary and timeouts fixed; still SSR-smoke-only tests |
 | World Engine | **NEEDS WORK** | 0 P0, 8 P1 | SSRF surface fixed; `WATCH` claims can enable creator options; single-source verification |
 | Evolution | **PASS WITH FINDINGS** | 0 P0, 3 P1 | gate is real and correct; activated prompts are never used in generation |
 | Performance | **NEEDS WORK** | 0 P0, 5 P1 | measured: persist() 82ms p50 at 13MiB; overview 5ms at 4k events; no code splitting |
-| Scalability | **NEEDS WORK** | 0 P0, 4 P1 | every collection unbounded; whole-state rewrite per save; no pagination |
+| Scalability | **NEEDS WORK** | 0 P0 open | Retention and pagination added; save pattern still whole-state |
 | Reliability | **NEEDS WORK** | 2 P0 | scheduler never persisted; shutdown never flushed — both fixed |
-| Observability | **BLOCKED** | — | zero metrics, zero request ids, 500s never logged. Not a defect list, an absence |
+| Observability | **NEEDS WORK** | - | Request ids, failure logging and a readiness probe added; no metrics or tracing |
 | Platform integrations | **NOT IMPLEMENTED** | — | adapters proven only against a simulated transport; gate correctly closed |
 | Testing | **NEEDS WORK** | — | 433 tests, but frontend is 100% server-render smoke: no DOM, no interaction, no network mocking |
 
@@ -70,46 +70,56 @@ Each with a named regression test in `packages/server/test/qa-regressions.test.t
 | Frontend | Nested `<form>`, reset request also submitted a sign-in | **introduced in `4d2c69e`** |
 | Frontend | No error boundary; no fetch timeout | pre-existing |
 
-## What is still open
+## What was fixed, and what is still open
 
-Not fixed, with reasons. Full detail in the per-area documents.
+> **Status: 8 fix commits landed since this audit** — `9397257`, `cf17ef6`,
+> `cc7a063`, `e964838`, `b7eb85b`, `87843bb`, `ce8019e`, `6e15414`.
+> Roughly 82 findings are closed; **about 72 remain open**. The counts below are
+> as of `6e15414`, not as of the original audit.
 
-**P0 — none remaining that I could reproduce.** The three data-destruction
-paths and the two authz holes are closed.
+**All P0s are closed.** The three that survived the first pass — the data wipe,
+stored XSS via upload, and prompt injection — were fixed in `cc7a063`, together
+with the highest-risk P1s.
 
-**P1, security:** `cors()` reflects `*`; admin token compared non-constant-time
-and `adminGuard` performs no CSRF check; uploads trust client `Content-Type` and
-are served `inline` with CSP disabled (stored XSS); the rate limiter is not
-applied to `generate`, uploads, or admin research runs; lockout counter is a
-non-atomic read-modify-write and never decays.
+| Commit | Closed |
+| --- | --- |
+| `9397257` | Both authz holes, Host-header link poisoning, error-handler leak, SSRF via unchecked redirects and link-local targets, auth routes never persisting, scheduler discarding its output, shutdown not flushing, four separate Postgres defects, blank shot list, silent sign-out, no error boundary, no fetch timeouts, nested form |
+| `cc7a063` | **P0:** data wipe on failed load, stored XSS, prompt injection (fencing, comment stripping, whole-quote evidence gate). Admin API falling open, admin CSRF, constant-time token compare, CORS wildcard, generation/upload budgets, `WATCH` claims enabling creator options, capability state defaulting to `ACTIVE`, **activated prompts never reaching generation** |
+| `e964838` | Unhandled rejection in asset delete, lockout that never decayed, provider body-read timeout, session and rate-limit map leaks, reset/verify not persisting, three UI dead ends, `isPublicPath` exact match |
+| `b7eb85b` | Snapshot and event retention, pagination on event and proposal endpoints |
+| `87843bb` | Request IDs and failure logging, health semantics with liveness/readiness split, stalled-body and robots timeouts, strict mutation schemas, source maps no longer served, immutable asset caching, route-level code splitting |
+| `ce8019e` | Persistence write safety (unique temp, fsync, cleanup), compact state writes, source registry paging, skip link, main landmark, live status regions, lazy images, JSON parse guard |
+| `6e15414` | The regression runner asserting its own requirement — an activation gate that could be passed by a prompt ignoring the verified change |
 
-**P1, data:** `load()` failures are swallowed, so a broken projection boots empty
-and then rewrites real rows; `save()` is delete-all-then-insert with no
-transactional increment; sessions are never pruned and `getEvent` does a full
-sort per call; Postgres `save()` is 2 round-trips per row.
+**Still open, in priority order:**
 
-**P1, AI:** fetched page text reaches the model prompt unfenced, and the
-verbatim-evidence gate only checks the first 60 characters, so injected text can
-quote itself as evidence; activated prompt versions never reach generation, so
-prompt evolution has no effect on output; a model fact at `capabilities.X` with
-no explicit state defaults to `ACTIVE`; no range validation on extracted values;
-no per-request or per-creator cost ceiling.
+1. **Incremental persistence (~10).** `save()` is still delete-all-then-insert:
+   two round-trips per row in Postgres, and the JSON backend still rewrites
+   everything on each mutating request. The write is now safe and cheaper, but
+   the pattern is unchanged. This is the largest single item and the only one
+   that will bite at real scale.
+2. **No frontend interaction tests (~8).** No jsdom, no request mocking. Every
+   UI fix in this entire effort is verified by typecheck and server-render smoke
+   only. This is the weakest guarantee in the project and it is a test-coverage
+   problem, not a code problem.
+3. **Embeddings are computed but never used for retrieval (~3).** A hosted
+   provider bills per chunk while `retrieveKnowledge` is lexical only. Either
+   rank by similarity or drop the hosted provider.
+4. **Remaining a11y and polish (~25).** `aria-live` on async status, focus
+   management on route change, some heading semantics, a few contract type
+   narrowings, `compression()` (the package is not installed).
+5. **Remaining P2/P3 security and correctness (~26).** Non-atomic writes in
+   several places, `getEvent` doing a full sort per call, no idempotency key on
+   generation or upload, missing foreign keys and indexes on 7 of 24 tables,
+   publish-timeout ambiguity on the adapter path.
 
-**P1, world engine:** `applyClaims` applies `WATCH` claims as well as
-`ACCEPTED`, so two news sources can switch a creator option on;
-`deprecationsRequireOfficialEvidence` is dead code, so a non-official claim can
-switch a working option *off*; one first-party source reaches `ACCEPTED` at 0.85.
+**Two known blind spots in this audit itself:**
 
-**P1, frontend:** no retry on the Tools or Personalisation error states;
-`AssetsPage` shows its empty state while loading; `App` renders a `<div>` rather
-than `<main>` during load; no `aria-live`, `role="alert"`, skip link or focus
-management anywhere; `PersonalisationPage` refetches on every `App` render.
+- Everything was verified against `FakeSql`, never a live Postgres.
+- The model paths were exercised only through stubs. No test asserts prompt
+  construction end to end, and the OpenRouter API is unreachable from the
+  machine that ran this audit.
 
-**P2, cross-cutting:** no pagination on any collection endpoint; no idempotency
-key on generation or upload; no request id or metrics; no `compression()`; the
-859KB source map is served publicly; the 211KB bundle is not code-split; the
-admin action `actor` is taken from the request body, so the decision log is
-spoofable.
 
 ## The honest verdict on the four questions that matter
 

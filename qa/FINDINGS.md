@@ -1,7 +1,13 @@
 # Findings register
 
 Every finding from all seven audit passes, deduplicated, ordered by severity.
-`[F]` = fixed in `9397257` with a regression test. `[O]` = open.
+`[F]` = fixed, with a regression test. `[O]` = open.
+
+> **As of `6e15414`.** 8 fix commits have landed since the audit. All 16 P0s are
+> closed. Roughly 82 of ~154 findings are closed and **about 72 remain open**.
+> See [MASTER-QA-AUDIT.md](MASTER-QA-AUDIT.md) for what each fix commit covered
+> and what the remaining work is. The entries below are the original findings;
+> `[F]`/`[O]` reflect current state.
 
 Corroboration count in brackets: how many independent passes found it. A `[4]`
 on an authz bug means four auditors hit it separately, which is why it was
@@ -14,17 +20,17 @@ reproduced by hand before anything was written.
 | S-01 | Authz | `api/app.ts:297` vs `:306` | `/api/creator/:creatorId/updates` registered **above** `requireAuth`; anyone reads any creator's notifications, impacts and display name with no session. A test asserted 200. | 4 | **[F]** |
 | S-02 | Authz | `api/app.ts:596` | `/api/creator/:creatorId/impact` reads the creator from the URL with no ownership check (IDOR). | 2 | **[F]** |
 | S-03 | Security | `api/auth.ts:418` | Recovery links built from `Host` + `X-Forwarded-Proto`; a forged header redirects a reset token to an attacker. | 2 | **[F]** `PUBLIC_BASE_URL` |
-| S-04 | Security | `api/app.ts:461,504` | Upload trusts client `Content-Type` and is served `inline` with CSP disabled → stored XSS on the API origin. | 2 | [O] |
+| S-04 | Security | `api/app.ts:461,504` | Upload trusts client `Content-Type` and is served `inline` with CSP disabled → stored XSS on the API origin. | 2 | 2 | **[F]** type allowlist, attachment + nosniff + sandbox CSP |
 | S-05 | SSRF | `fetcher.ts:104` | `redirect: 'follow'` never re-checks the allowlist; an allowed host can 302 to `169.254.169.254`. | 3 | **[F]** |
 | S-06 | SSRF | `fetcher.ts:38` | Empty `ALLOWED_HOSTS` (the default) allows every host; no private-IP or DNS check anywhere. | 3 | **[F]** |
 | D-01 | Data | `postgres-persistence.ts:281` | `TABLES` omitted `cm_media_asset` + `cm_profile_account_link`, both with PKs → second save dies on duplicate keys and rolls back **all** state. Introduced by me in `9980c5d`. | 1 | **[F]** |
 | D-02 | Data | `postgres-persistence.ts:247` | `INSERT INTO cm_preference_counter (id, creator_id, key, value, weight)` — the table has no `key` column, so every Postgres save aborts. | 1 | **[F]** |
 | D-03 | Data | `sql-migrate.ts:20` | `migrate()` never inserts the `cm_meta` singleton, so `checkSchema` never passes and `PERSISTENCE=postgres` can never boot. | 1 | **[F]** |
-| D-04 | Data | `context.ts:59` | `load().catch(() => null)` swallows a broken projection: the app boots empty, re-seeds, then `save()` deletes all real rows. | 1 | [O] |
+| D-04 | Data | `context.ts:59` | `load().catch(() => null)` swallows a broken projection: the app boots empty, re-seeds, then `save()` deletes all real rows. | 1 | 1 | **[F]** fails fast, never boots empty |
 | D-05 | Data | `auth.ts:196-217` | register/login/logout/verify never call `persist()`. Accounts, sessions and the account→profile link survive only if an unrelated write ran. | 3 | **[F]** |
 | D-06 | Data | `scheduler.ts:21` | The research loop has no persistence hook; all autonomous World Engine output is lost on exit. | 3 | **[F]** `onCycleComplete` |
 | D-07 | Data | `index.ts:40` | Shutdown closes the server without flushing state. | 2 | **[F]** |
-| A-01 | AI | `extract/model.ts:84` | Fetched page text is concatenated into the model prompt unfenced, HTML comments included. The evidence gate checks only the first 60 characters, so injected text can quote itself as evidence and be accepted. | 1 | [O] |
+| A-01 | AI | `extract/model.ts:84` | Fetched page text is concatenated into the model prompt unfenced, HTML comments included. The evidence gate checks only the first 60 characters, so injected text can quote itself as evidence and be accepted. | 1 | 1 | **[F]** fenced, comments stripped, whole-quote gate |
 | U-01 | Frontend | `lib/api.ts:266` | Storyboard shot fields do not match the server (`order/durationSeconds/shot/onScreen` vs `index/seconds/visual/onScreenText`). The shot list always rendered blank. | 1 | **[F]** |
 | U-02 | Frontend | `App.tsx:39` | Any `ApiError` — including 500 and CSRF 403 — signs the creator out. The `error` phase with "Try again" was unreachable for every HTTP error. | 1 | **[F]** |
 
