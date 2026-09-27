@@ -180,7 +180,17 @@ a { color: inherit; text-decoration: none; }
 .field label { font-size: 13px; color: var(--text-soft); }
 .field .help { font-size: 12px; color: var(--text-faint); }
 
-input[type="text"], textarea, select {
+/* Every text-like control gets the same treatment. The selector used to name only
+   text inputs, so password and email fields fell back to the browser default —
+   a flat gray box on a dark page, exactly as a user reported with a screenshot. */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="url"],
+input:not([type]),
+textarea,
+select {
   width: 100%;
   background: var(--bg-soft);
   border: 1px solid var(--line);
@@ -189,7 +199,14 @@ input[type="text"], textarea, select {
   font: inherit;
   padding: 11px 13px;
 }
-input[type="text"]:focus, textarea:focus, select:focus {
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus,
+input[type="url"]:focus,
+input:not([type]):focus,
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -217,6 +234,41 @@ button.ghost {
   cursor: pointer;
 }
 button.ghost:hover { color: var(--text); border-color: var(--accent); }
+button.ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Keyboard users get the same visible state as mouse users. Without this,
+   tabbing through the app shows the browser default ring on some controls and
+   nothing at all on others, depending on the browser. */
+button:focus-visible,
+a:focus-visible,
+.option:focus-visible,
+.pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button.ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* A file picker is not a text box: no full-width background, just a control
+   that matches the page instead of the browser default gray. */
+input[type="file"] {
+  font: inherit;
+  color: var(--text-soft);
+  max-width: 100%;
+}
+input[type="file"]::file-selector-button {
+  font: inherit;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 9px 14px;
+  margin-right: 12px;
+  cursor: pointer;
+}
+input[type="file"]:disabled::file-selector-button {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .counter { font-size: 12px; color: var(--text-faint); display: flex; justify-content: space-between; gap: 10px; }
 .counter.over { color: var(--stop); }
